@@ -8,7 +8,7 @@ require (
 	github.com/erkanzileli/co-author v0.0.7
 	go.k6.io/k6 v0.44.1
 	go.k6.io/xk6 v0.9.1
-	golang.org/x/tools v0.9.1
+	golang.org/x/tools v0.9.3
 	honnef.co/go/tools v0.4.3
 )
 
