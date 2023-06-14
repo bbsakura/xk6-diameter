@@ -1,5 +1,5 @@
 golang 1.20.5
 python 3.11.4
-pre-commit 2.21.0
+pre-commit 3.3.3
 direnv 2.32.3
 jq 1.6
