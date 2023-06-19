@@ -35,7 +35,7 @@ clean: ## Remove build related file
 	rm -fr ./out/bin
 
 xk6build: ## Package the project
-	xk6 build --with github.com/bbsakura/xk6-diameter@latest=$(shell pwd) --output ./out/bin/xk6gtp
+	xk6 build --with github.com/bbsakura/xk6-diameter@latest=$(shell pwd) --output ./out/bin/xk6diameter
 
 ## Test:
 test: ## Run the tests of the project
