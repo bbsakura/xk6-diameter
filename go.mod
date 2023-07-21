@@ -4,13 +4,15 @@ go 1.20
 
 require (
 	github.com/dmarkham/enumer v1.5.8
+	github.com/dop251/goja v0.0.0-20230621100801-7749907a8a20
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
+	github.com/pkg/errors v0.9.1
 	go.k6.io/k6 v0.46.0
 	go.k6.io/xk6 v0.9.2
-	golang.org/x/tools v0.13.0
-	honnef.co/go/tools v0.4.6
+	golang.org/x/tools v0.12.0
+	honnef.co/go/tools v0.4.5
 )
 
 require (
@@ -22,7 +24,6 @@ require (
 	github.com/charmbracelet/lipgloss v0.4.0 // indirect
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/dlclark/regexp2 v1.9.0 // indirect
-	github.com/dop251/goja v0.0.0-20230621100801-7749907a8a20 // indirect
 	github.com/elisescu/pty v1.0.2 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4-0.20211119122758-180fcef48034+incompatible // indirect
@@ -42,7 +43,6 @@ require (
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.27.7 // indirect
 	github.com/pascaldekloe/name v1.0.0 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/sahilm/fuzzy v0.1.0 // indirect
 	github.com/serenize/snaker v0.0.0-20201027110005-a7ad2135616e // indirect
@@ -50,13 +50,13 @@ require (
 	github.com/spf13/afero v1.1.2 // indirect
 	github.com/spf13/cobra v1.4.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/crypto v0.13.0 // indirect
+	golang.org/x/crypto v0.12.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20221208152030-732eee02a75a // indirect
 	golang.org/x/mod v0.12.0 // indirect
-	golang.org/x/net v0.15.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
-	golang.org/x/term v0.12.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/net v0.14.0 // indirect
+	golang.org/x/sys v0.11.0 // indirect
+	golang.org/x/term v0.11.0 // indirect
+	golang.org/x/text v0.12.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gopkg.in/guregu/null.v3 v3.3.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
