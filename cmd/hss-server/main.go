@@ -36,7 +36,7 @@ const (
 )
 
 func main() {
-	addr := flag.String("addr", ":3868", "address in the form of ip:port to listen on")
+	addr := flag.String("addr", "0.0.0.0:3868", "address in the form of ip:port to listen on")
 	ppaddr := flag.String("pprof_addr", ":9000", "address in form of ip:port for the pprof server")
 	host := flag.String("diam_host", "server", "diameter identity host")
 	realm := flag.String("diam_realm", "go-diameter", "diameter identity realm")
