@@ -6,6 +6,7 @@ require (
 	github.com/dmarkham/enumer v1.5.8
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
+	github.com/fiorix/go-diameter/v4 v4.0.4
 	go.k6.io/k6 v0.45.0
 	go.k6.io/xk6 v0.9.2
 	golang.org/x/tools v0.11.0
@@ -27,6 +28,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.4-0.20211119122758-180fcef48034+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/ishidawataru/sctp v0.0.0-20190922091402-408ec287e38c // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -48,12 +50,13 @@ require (
 	github.com/spf13/afero v1.1.2 // indirect
 	github.com/spf13/cobra v1.4.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/crypto v0.9.0 // indirect
+	golang.org/x/crypto v0.11.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20221208152030-732eee02a75a // indirect
 	golang.org/x/mod v0.12.0 // indirect
+	golang.org/x/net v0.12.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect
-	golang.org/x/term v0.8.0 // indirect
-	golang.org/x/text v0.9.0 // indirect
+	golang.org/x/term v0.10.0 // indirect
+	golang.org/x/text v0.11.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gopkg.in/guregu/null.v3 v3.3.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
