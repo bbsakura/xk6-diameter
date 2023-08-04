@@ -7,7 +7,7 @@ require (
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
-	go.k6.io/k6 v0.45.0
+	go.k6.io/k6 v0.45.1
 	go.k6.io/xk6 v0.9.2
 	golang.org/x/tools v0.11.1
 	honnef.co/go/tools v0.4.3
