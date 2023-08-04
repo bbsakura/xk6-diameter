@@ -16,7 +16,7 @@ WHITE  := $(shell tput -Txterm setaf 7)
 CYAN   := $(shell tput -Txterm setaf 6)
 RESET  := $(shell tput -Txterm sgr0)
 
-.PHONY: all test stylecheck build make_outdir single_target clean xk6build package help $(TARGETS)
+.PHONY: all test stylecheck build make_outdir single_target cmd_build clean xk6build package help $(TARGETS)
 
 all: help
 
@@ -28,6 +28,7 @@ make_outdir:
 single_target:
 	$(GOCMD) build -o out/bin/main ./main.go
 
+cmd_build: $(TARGETS)
 $(TARGETS):
 	$(GOCMD) build -o out/bin/$@ ./cmd/$@/...
 
