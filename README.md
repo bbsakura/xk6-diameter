@@ -22,7 +22,8 @@ make build
 ```shell
 ./out/bin/xk6-diameter run example/sample-stress.js
 
-./out/bin/hss
+./out/bin/hss-client
+./out/bin/hss-server
 ```
 
 ## Support scenario

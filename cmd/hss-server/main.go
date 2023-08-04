@@ -32,6 +32,7 @@ import (
 )
 
 const (
+	// defined in https://www.iana.org/assignments/enterprise-numbers/?q=3gpp
 	VENDOR_3GPP = 10415
 )
 
@@ -77,6 +78,8 @@ func main() {
 
 func sendAIA(settings sm.Settings, w io.Writer, m *diam.Message) (n int64, err error) {
 
+	// TS29.272; MME/SGSN interface https://portal.3gpp.org/desktopmodules/Specifications/SpecificationDetails.aspx?specificationId=1690
+	// TS33.401; security architecture https://portal.3gpp.org/desktopmodules/Specifications/SpecificationDetails.aspx?specificationId=2296
 	m.NewAVP(avp.AuthenticationInfo, avp.Mbit, VENDOR_3GPP, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.EUTRANVector, avp.Mbit, VENDOR_3GPP, &diam.GroupedAVP{
@@ -89,6 +92,7 @@ func sendAIA(settings sm.Settings, w io.Writer, m *diam.Message) (n int64, err e
 			}),
 		},
 	})
+	fmt.Println(m)
 
 	return m.WriteTo(w)
 }
@@ -114,6 +118,7 @@ func handleAIR(settings sm.Settings) diam.HandlerFunc {
 		var req AIR
 		var code uint32
 
+		fmt.Println(m)
 		err = m.Unmarshal(&req)
 		if err != nil {
 			err = fmt.Errorf("unmarshal failed: %s", err)
@@ -142,33 +147,33 @@ func sendULA(settings sm.Settings, w io.Writer, m *diam.Message) (n int64, err e
 	m.NewAVP(avp.SubscriptionData, avp.Mbit, VENDOR_3GPP, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.MSISDN, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.OctetString("12345")),
-			diam.NewAVP(avp.AccessRestrictionData, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(47)),
-			diam.NewAVP(avp.SubscriberStatus, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
-			diam.NewAVP(avp.NetworkAccessMode, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(2)),
+			diam.NewAVP(avp.AccessRestrictionData, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(47)), // 3Gに関するアクセスからのものを落としてる
+			diam.NewAVP(avp.SubscriberStatus, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),       // SERVICE_GRANTED である旨を返してる
+			diam.NewAVP(avp.NetworkAccessMode, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(2)),      // ONLY_PACKET (2) である旨を返してる
 			diam.NewAVP(avp.AMBR, avp.Mbit|avp.Vbit, VENDOR_3GPP, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.MaxRequestedBandwidthDL, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(500)),
-					diam.NewAVP(avp.MaxRequestedBandwidthUL, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(500)),
+					diam.NewAVP(avp.MaxRequestedBandwidthDL, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(500)), // 0.5kbps
+					diam.NewAVP(avp.MaxRequestedBandwidthUL, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(500)), // 0.5kbps
 				},
 			}),
 			diam.NewAVP(avp.APNConfigurationProfile, avp.Mbit|avp.Vbit, VENDOR_3GPP, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
 					diam.NewAVP(avp.ContextIdentifier, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
-					diam.NewAVP(avp.AllAPNConfigurationsIncludedIndicator, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
-					diam.NewAVP(avp.NetworkAccessMode, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(2)),
+					diam.NewAVP(avp.AllAPNConfigurationsIncludedIndicator, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)), // All_APN_CONFIGURATIONS_INCLUDEDなのですべての APN 設定を削除してから、受信したすべての APN 設定を保存するように要求してる
+					diam.NewAVP(avp.NetworkAccessMode, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(2)),                     // ONLY_PACKET (2) である旨を返してる（なぜこっちでも？）
 					diam.NewAVP(avp.APNConfiguration, avp.Mbit, VENDOR_3GPP, &diam.GroupedAVP{
 						AVP: []*diam.AVP{
 							diam.NewAVP(avp.ContextIdentifier, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
-							diam.NewAVP(avp.PDNType, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
-							diam.NewAVP(avp.ServiceSelection, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.UTF8String("oai.ipv4")),
+							diam.NewAVP(avp.PDNType, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),                   // IPv4 (0)
+							diam.NewAVP(avp.ServiceSelection, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.UTF8String("oai.ipv4")), // apnのネットワーク識別子が書いてる
 							diam.NewAVP(avp.EPSSubscribedQoSProfile, avp.Mbit|avp.Vbit, VENDOR_3GPP, &diam.GroupedAVP{
 								AVP: []*diam.AVP{
-									diam.NewAVP(avp.QoSClassIdentifier, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(9)),
-									diam.NewAVP(avp.AllocationRetentionPriority, avp.Mbit|avp.Vbit, VENDOR_3GPP, &diam.GroupedAVP{
+									diam.NewAVP(avp.QoSClassIdentifier, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(9)), // TS29.212 5.3.17	QoS-Class-Identifier->TS23.203 6.1.7.2 Standardized QCI characteristics
+									diam.NewAVP(avp.AllocationRetentionPriority, avp.Mbit|avp.Vbit, VENDOR_3GPP, &diam.GroupedAVP{ // TS29.212 5.3.12
 										AVP: []*diam.AVP{
-											diam.NewAVP(avp.PriorityLevel, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(15)),
-											diam.NewAVP(avp.PreemptionCapability, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(1)),
-											diam.NewAVP(avp.PreemptionVulnerability, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)),
+											diam.NewAVP(avp.PriorityLevel, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(15)),          // TS29.212 5.3.45 生成されたベアラーの優先順位（15が一番低い）
+											diam.NewAVP(avp.PreemptionCapability, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(1)),    // TS29.212 5.3.46 PRE-EMPTION_CAPABILITY_DISABLED (1) である旨を返してる.ベアラがすでに割り当てされてる場合は利用できないことを示してる（奪うことができる方）
+											diam.NewAVP(avp.PreemptionVulnerability, avp.Mbit|avp.Vbit, VENDOR_3GPP, datatype.Unsigned32(0)), // TS29.212 5.3.47 PRE-EMPTION_VULNERABILITY_ENABLED (0)である旨を返してる.ベアラがすでに割り当てされてるでも上書きして利用できることを示してる（奪われることを許可する方）
 										},
 									}),
 								},
@@ -185,27 +190,30 @@ func sendULA(settings sm.Settings, w io.Writer, m *diam.Message) (n int64, err e
 			}),
 		},
 	})
+	fmt.Println(m)
 
 	return m.WriteTo(w)
 }
 
 func handleULR(settings sm.Settings) diam.HandlerFunc {
 
+	// TS 29.272
 	type ULR struct {
 		SessionID        datatype.UTF8String       `avp:"Session-Id"`
 		OriginHost       datatype.DiameterIdentity `avp:"Origin-Host"`
 		OriginRealm      datatype.DiameterIdentity `avp:"Origin-Realm"`
 		AuthSessionState datatype.Unsigned32       `avp:"Auth-Session-State"`
-		UserName         datatype.UTF8String       `avp:"User-Name"`
-		VisitedPLMNID    datatype.OctetString      `avp:"Visited-PLMN-Id"`
-		RATType          datatype.Unsigned32       `avp:"RAT-Type"`
-		ULRFlags         datatype.Unsigned32       `avp:"ULR-Flags"`
+		UserName         datatype.UTF8String       `avp:"User-Name"`       // TS 23.003(2.2 Composition of IMSI)
+		VisitedPLMNID    datatype.OctetString      `avp:"Visited-PLMN-Id"` // TS 29.272 7.3.９ Visited-PLMN-Id
+		RATType          datatype.Unsigned32       `avp:"RAT-Type"`        // TS 29.212(5.3.31	RAT-Type AVP)
+		ULRFlags         datatype.Unsigned32       `avp:"ULR-Flags"`       // TS 29.272 7.3.7 ULR-Flags
 	}
 	return func(c diam.Conn, m *diam.Message) {
 		var err error = nil
 		var req ULR
 		var code uint32
 
+		fmt.Println(m)
 		err = m.Unmarshal(&req)
 		if err != nil {
 			err = fmt.Errorf("unmarshal failed: %s", err)
