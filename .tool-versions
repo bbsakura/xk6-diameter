@@ -1,4 +1,4 @@
-golang 1.20.7
+golang 1.21.0
 python 3.11.4
 pre-commit 3.3.3
 direnv 2.32.3
