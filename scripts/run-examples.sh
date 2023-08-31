@@ -4,7 +4,7 @@
 
 # startup hss-server for tests
 pkill hss-server
-./out/bin/hss-server >/dev/null 2>&1 &
+./out/bin/hss-server -network_type sctp >/dev/null 2>&1 &
 
 function cleanup() {
     echo [INFO] pkill hss-server
