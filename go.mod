@@ -10,7 +10,7 @@ require (
 	go.k6.io/k6 v0.46.0
 	go.k6.io/xk6 v0.9.2
 	golang.org/x/tools v0.13.0
-	honnef.co/go/tools v0.4.5
+	honnef.co/go/tools v0.4.6
 )
 
 require (
