@@ -3,8 +3,8 @@ module github.com/bbsakura/xk6-diameter
 go 1.20
 
 require (
-	github.com/dmarkham/enumer v1.5.8
-	github.com/dop251/goja v0.0.0-20230919151941-fc55792775de
+	github.com/dmarkham/enumer v1.5.9
+	github.com/dop251/goja v0.0.0-20231024180952-594410467bc6
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
