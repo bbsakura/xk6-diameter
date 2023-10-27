@@ -1,17 +1,19 @@
 module github.com/bbsakura/xk6-diameter
 
-go 1.20
+go 1.21
+
+toolchain go1.21.3
 
 require (
 	github.com/dmarkham/enumer v1.5.9
-	github.com/dop251/goja v0.0.0-20231024180952-594410467bc6
+	github.com/dop251/goja v0.0.0-20231027120936-b396bb4c349d
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
 	github.com/pkg/errors v0.9.1
-	go.k6.io/k6 v0.46.0
-	go.k6.io/xk6 v0.9.2
-	golang.org/x/tools v0.14.0
+	go.k6.io/k6 v0.47.0
+	go.k6.io/xk6 v0.10.0
+	golang.org/x/tools v0.16.0
 	honnef.co/go/tools v0.4.6
 )
 
@@ -50,13 +52,13 @@ require (
 	github.com/spf13/afero v1.1.2 // indirect
 	github.com/spf13/cobra v1.4.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/crypto v0.14.0 // indirect
+	golang.org/x/crypto v0.16.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20221208152030-732eee02a75a // indirect
-	golang.org/x/mod v0.12.0 // indirect
-	golang.org/x/net v0.14.0 // indirect
-	golang.org/x/sys v0.11.0 // indirect
-	golang.org/x/term v0.11.0 // indirect
-	golang.org/x/text v0.12.0 // indirect
+	golang.org/x/mod v0.14.0 // indirect
+	golang.org/x/net v0.19.0 // indirect
+	golang.org/x/sys v0.15.0 // indirect
+	golang.org/x/term v0.15.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gopkg.in/guregu/null.v3 v3.3.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
