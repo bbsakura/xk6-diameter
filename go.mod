@@ -13,7 +13,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	go.k6.io/k6 v0.48.0
 	go.k6.io/xk6 v0.10.0
-	golang.org/x/tools v0.16.0
+	golang.org/x/tools v0.16.1
 	honnef.co/go/tools v0.4.6
 )
 
