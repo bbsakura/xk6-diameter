@@ -11,7 +11,7 @@ require (
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
 	github.com/pkg/errors v0.9.1
-	go.k6.io/k6 v0.49.0
+	go.k6.io/k6 v0.50.0
 	go.k6.io/xk6 v0.11.0
 	golang.org/x/tools v0.19.0
 	honnef.co/go/tools v0.4.7
@@ -31,7 +31,7 @@ require (
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/go-logr/logr v1.3.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-sourcemap/sourcemap v2.1.4-0.20211119122758-180fcef48034+incompatible // indirect
+	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/pprof v0.0.0-20230728192033-2ba5b33183c6 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
@@ -76,7 +76,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20231002182017-d307bd883b97 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231012201019-e917dd12ba7a // indirect
 	google.golang.org/grpc v1.60.0 // indirect
-	google.golang.org/protobuf v1.31.1-0.20231027082548-f4a6c1f6e5c1 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/guregu/null.v3 v3.3.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
