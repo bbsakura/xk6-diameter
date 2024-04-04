@@ -66,9 +66,9 @@ type ConnectionOptions struct {
 	Realm           string
 	NetworkType     string
 	Retries         uint
-	VendorID        uint   
-	AppID           uint   
-	UeIMSI          string
+	VendorId        uint
+	AppId           uint
+	Ueimsi          string
 	PlmnID          string
 	Vectors         uint
 	CompletionSleep uint
@@ -80,7 +80,6 @@ type K6DiameterClient struct {
 	Conn     diam.Conn
 	doneAIR  chan int
 	doneULR  chan int
-	options  *ConnectionOptions
 	sessions *sync.Map
 }
 
@@ -94,14 +93,13 @@ func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Ob
 }
 
 func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
-	//var err error
 	if len(options.Addr) == 0 {
 		return false, errors.New("missing addr")
 	}
 	cfg := &sm.Settings{
 		OriginHost:       datatype.DiameterIdentity(options.Host),
 		OriginRealm:      datatype.DiameterIdentity(options.Realm),
-		VendorID:         datatype.Unsigned32(options.VendorID),
+		VendorID:         datatype.Unsigned32(options.VendorId),
 		ProductName:      "xk6-diameter",
 		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
 		FirmwareRevision: 1,
@@ -118,13 +116,13 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 		EnableWatchdog:   false,
 		WatchdogInterval: 0,
 		SupportedVendorID: []*diam.AVP{
-			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorID)),
+			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 		},
 		VendorSpecificApplicationID: []*diam.AVP{
 			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(options.AppID)),
-					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorID)),
+					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(options.AppId)),
+					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 				},
 			}),
 		},
@@ -150,7 +148,6 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 
 	c.Conn = conn
 	c.cfg = cfg
-	c.options = &options
 	return true, nil
 }
 
@@ -161,11 +158,10 @@ func (c *K6DiameterClient) Close() {
 	c.Conn.Close()
 }
 
-func (c *K6DiameterClient) SendAIR() bool {
+func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
-		log.Println("peer metadata unavailable")
-		return false
+		return false, errors.New("peer metadata unavailable")
 	}
 
 	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
@@ -175,40 +171,43 @@ func (c *K6DiameterClient) SendAIR() bool {
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
 	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 	m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
-	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(c.options.UeIMSI))
+	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(options.Ueimsi))
 	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(0))
-	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.OctetString(c.options.PlmnID))
-	m.NewAVP(avp.RequestedEUTRANAuthenticationInfo, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), &diam.GroupedAVP{
+	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.OctetString(options.PlmnID))
+	m.NewAVP(avp.RequestedEUTRANAuthenticationInfo, avp.Vbit|avp.Mbit, uint32(options.VendorId), &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(
-				avp.NumberOfRequestedVectors, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.Unsigned32(c.options.Vectors)),
+				avp.NumberOfRequestedVectors, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(options.Vectors)),
 			diam.NewAVP(
-				avp.ImmediateResponsePreferred, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.Unsigned32(0)),
+				avp.ImmediateResponsePreferred, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(0)),
 		},
 	})
 	if _, err := m.WriteTo(c.Conn); err != nil {
-		log.Println(err)
-		return false
+		return false, errors.WithMessage(err, "write message fail")
 	}
 
+	return true, nil
+}
+
+func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (bool, error) {
+	if _, err := c.SendAIR(options); err != nil {
+		return false, err
+	}
 	select {
 	case res := <-c.doneAIR:
 		if res != 0 {
-			log.Println("Authentication Information Parse Error")
-			return false
+			return false, errors.New("Authentication Information Parse Error")
 		}
-	case <-time.After(5 * time.Second):
-		log.Println("Authentication Information timeout")
-		return false
+	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+		return false, errors.New("Authentication Information timeout")
 	}
-	return true
+	return true, nil
 }
 
-func (c *K6DiameterClient) SendULR() bool {
+func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
-		log.Println("peer metadata unavailable")
-		return false
+		return false, errors.New("peer metadata unavailable")
 	}
 	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
 	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
@@ -217,27 +216,31 @@ func (c *K6DiameterClient) SendULR() bool {
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
 	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 	m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
-	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(c.options.UeIMSI))
+	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(options.Ueimsi))
 	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(0))
-	m.NewAVP(avp.RATType, avp.Mbit, uint32(c.options.VendorID), datatype.Enumerated(1004))
-	m.NewAVP(avp.ULRFlags, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.Unsigned32(ULR_FLAGS))
-	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.OctetString(c.options.PlmnID))
+	m.NewAVP(avp.RATType, avp.Mbit, uint32(options.VendorId), datatype.Enumerated(1004))
+	m.NewAVP(avp.ULRFlags, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(ULR_FLAGS))
+	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.OctetString(options.PlmnID))
 	if _, err := m.WriteTo(c.Conn); err != nil {
-		log.Println(err)
-		return false
+		return false, errors.WithMessage(err, "write message fail")
 	}
 
+	return true, nil
+}
+
+func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (bool, error) {
+	if _, err := c.SendULR(options); err != nil {
+		return false, err
+	}
 	select {
 	case res := <-c.doneULR:
 		if res != 0 {
-			log.Println("Authentication Information Parse Error")
-			return false
+			return false, errors.New("Authentication Information Parse Error")
 		}
-	case <-time.After(5 * time.Second):
-		log.Println("Authentication Information timeout")
-		return false
+	case <-time.After(3 * time.Second):
+		return false, errors.New("Authentication Information timeout")
 	}
-	return true
+	return true, nil
 }
 
 const ULR_FLAGS = 1<<1 | 1<<5

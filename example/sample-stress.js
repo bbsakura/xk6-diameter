@@ -13,17 +13,24 @@ export default function () {
         addr: `127.0.0.1:3868`,
         host: "magma-oai.openair4G.eur",
         realm: "openair4G.eur",
-        networktype: "sctp",
+        network_type: "sctp",
         retries: 0,
-        vendorID: 10415,
-        appID: 16777251,
-        ueIMSI: "001010000000001",
-        plmnID: "\x05",
+        vendor_id: 10415,
+        app_id: 16777251,
+        ueimsi: "001010000000001",
+        plmn_id: "\x05",
         vectors: 3,
-        completionsleep: 10,
+        completion_sleep: 5,
     });
     for (let i = 0; i < 4096; i++) {
-        const airRes = client.sendAIR();
+        const airRes = client.checkSendAIR({
+            vendor_id: 10415,
+            app_id: 16777251,
+            ueimsi: "001010000000001",
+            plmn_id: "\x05",
+            vectors: 3,
+            completion_sleep: 5,
+        });
         if (!airRes) {
             check(airRes, {
                 'Received AIR Response': (airRes) => airRes == true,
@@ -31,7 +38,14 @@ export default function () {
             });
             continue;
         }
-        const ulrRes = client.sendULR();
+        const ulrRes = client.checkSendULR({
+            vendor_id: 10415,
+            app_id: 16777251,
+            ueimsi: "001010000000001",
+            plmn_id: "\x05",
+            vectors: 3,
+            completion_sleep: 5,
+        });
         check(ulrRes, {
             'Received AIR Response': (airRes) => airRes == true,
             'Received ULR Response': (ulrRes) => ulrRes == true,
