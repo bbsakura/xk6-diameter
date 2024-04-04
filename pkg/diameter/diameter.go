@@ -74,11 +74,15 @@ type ConnectionOptions struct {
 }
 
 type K6DiameterClient struct {
-	vu      modules.VU
-	cfg     *sm.Settings
-	Conn    diam.Conn
-	doneAIR chan int
-	doneULR chan int
+	vu              modules.VU
+	cfg             *sm.Settings
+	Conn            diam.Conn
+	handlerChannels handlerChannels
+}
+
+type handlerChannels struct {
+	checkAIR chan error
+	checkULR chan error
 }
 
 func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Object {
@@ -130,15 +134,15 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 		return false, errors.WithMessage(err, "Dial error")
 	}
 	// set MessageHandler
-	c.doneAIR = make(chan int, 1000)
+	c.handlerChannels.checkAIR = make(chan error, 1000)
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: false},
-		handleAuthenticationInformationAnswer(c.doneAIR))
+		handleAuthenticationInformationAnswer(c.handlerChannels.checkAIR))
 
-	c.doneULR = make(chan int, 1000)
+	c.handlerChannels.checkULR = make(chan error, 1000)
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: false},
-		handleUpdateLocationAnswer(c.doneULR))
+		handleUpdateLocationAnswer(c.handlerChannels.checkULR))
 
 	// Catch All
 	mux.HandleIdx(diam.ALL_CMD_INDEX, handleAll())
@@ -191,8 +195,8 @@ func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (bool, error)
 		return false, err
 	}
 	select {
-	case res := <-c.doneAIR:
-		if res != 0 {
+	case res := <-c.handlerChannels.checkAIR:
+		if res != nil {
 			return false, errors.New("Authentication Information Parse Error")
 		}
 	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
@@ -230,8 +234,8 @@ func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (bool, error)
 		return false, err
 	}
 	select {
-	case res := <-c.doneULR:
-		if res != 0 {
+	case res := <-c.handlerChannels.checkULR:
+		if res != nil {
 			return false, errors.New("Authentication Information Parse Error")
 		}
 	case <-time.After(3 * time.Second):
@@ -240,6 +244,7 @@ func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (bool, error)
 	return true, nil
 }
 
+// S6a/S6d-Indicator | Initial-AttachIndicator
 const ULR_FLAGS = 1<<1 | 1<<5
 
 type EUtranVector struct {
@@ -318,29 +323,27 @@ type ULA struct {
 	ExperimentalResult ExperimentalResult        `avp:"Experimental-Result"`
 }
 
-func handleAuthenticationInformationAnswer(done chan int) diam.HandlerFunc {
+func handleAuthenticationInformationAnswer(done chan error) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		var aia AIA
 		err := m.Unmarshal(&aia)
 		if err != nil {
-			log.Printf("AIA Unmarshal failed: %s", err)
-			done <- 1
+			done <- errors.WithMessage(err, "AIA Unmarshal failed")
 			return
 		}
-		done <- 0
+		done <- nil
 	}
 }
 
-func handleUpdateLocationAnswer(done chan int) diam.HandlerFunc {
+func handleUpdateLocationAnswer(done chan error) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		var ula ULA
 		err := m.Unmarshal(&ula)
 		if err != nil {
-			log.Printf("ULA Unmarshal failed: %s", err)
-			done <- 1
+			done <- errors.WithMessage(err, "ULA Unmarshal failed")
 			return
 		}
-		done <- 0
+		done <- nil
 	}
 }
 
