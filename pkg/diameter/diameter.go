@@ -66,8 +66,8 @@ type ConnectionOptions struct {
 	Realm           string
 	NetworkType     string
 	Retries         uint
-	VendorID        uint
-	AppID           uint
+	VendorID        uint   
+	AppID           uint   
 	UeIMSI          string
 	PlmnID          string
 	Vectors         uint
@@ -79,6 +79,7 @@ type K6DiameterClient struct {
 	cfg      *sm.Settings
 	Conn     diam.Conn
 	doneAIR  chan int
+	doneULR  chan int
 	options  *ConnectionOptions
 	sessions *sync.Map
 }
@@ -139,6 +140,11 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: false},
 		handleAuthenticationInformationAnswer(c.doneAIR))
 
+	c.doneULR = make(chan int, 1000)
+	mux.HandleIdx(
+		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: false},
+		handleUpdateLocationAnswer(c.doneULR))
+
 	// Catch All
 	mux.HandleIdx(diam.ALL_CMD_INDEX, handleAll())
 
@@ -187,6 +193,42 @@ func (c *K6DiameterClient) SendAIR() bool {
 
 	select {
 	case res := <-c.doneAIR:
+		if res != 0 {
+			log.Println("Authentication Information Parse Error")
+			return false
+		}
+	case <-time.After(5 * time.Second):
+		log.Println("Authentication Information timeout")
+		return false
+	}
+	return true
+}
+
+func (c *K6DiameterClient) SendULR() bool {
+	meta, ok := smpeer.FromContext(c.Conn.Context())
+	if !ok {
+		log.Println("peer metadata unavailable")
+		return false
+	}
+	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
+	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
+	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
+	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
+	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
+	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
+	m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
+	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(c.options.UeIMSI))
+	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(0))
+	m.NewAVP(avp.RATType, avp.Mbit, uint32(c.options.VendorID), datatype.Enumerated(1004))
+	m.NewAVP(avp.ULRFlags, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.Unsigned32(ULR_FLAGS))
+	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(c.options.VendorID), datatype.OctetString(c.options.PlmnID))
+	if _, err := m.WriteTo(c.Conn); err != nil {
+		log.Println(err)
+		return false
+	}
+
+	select {
+	case res := <-c.doneULR:
 		if res != 0 {
 			log.Println("Authentication Information Parse Error")
 			return false
@@ -282,6 +324,19 @@ func handleAuthenticationInformationAnswer(done chan int) diam.HandlerFunc {
 		err := m.Unmarshal(&aia)
 		if err != nil {
 			log.Printf("AIA Unmarshal failed: %s", err)
+			done <- 1
+			return
+		}
+		done <- 0
+	}
+}
+
+func handleUpdateLocationAnswer(done chan int) diam.HandlerFunc {
+	return func(c diam.Conn, m *diam.Message) {
+		var ula ULA
+		err := m.Unmarshal(&ula)
+		if err != nil {
+			log.Printf("ULA Unmarshal failed: %s", err)
 			done <- 1
 			return
 		}
