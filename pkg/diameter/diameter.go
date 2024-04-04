@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -75,19 +74,17 @@ type ConnectionOptions struct {
 }
 
 type K6DiameterClient struct {
-	vu       modules.VU
-	cfg      *sm.Settings
-	Conn     diam.Conn
-	doneAIR  chan int
-	doneULR  chan int
-	sessions *sync.Map
+	vu      modules.VU
+	cfg     *sm.Settings
+	Conn    diam.Conn
+	doneAIR chan int
+	doneULR chan int
 }
 
 func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Object {
 	rt := c.vu.Runtime()
 	cli := &K6DiameterClient{
-		vu:       c.vu,
-		sessions: &sync.Map{},
+		vu: c.vu,
 	}
 	return rt.ToValue(cli).ToObject(rt)
 }
