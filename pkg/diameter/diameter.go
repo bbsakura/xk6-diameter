@@ -1,3 +1,4 @@
+
 package diameter
 
 import (
@@ -66,6 +67,8 @@ type ConnectionOptions struct {
 	NetworkType     string
 	Retries         uint
 	VendorId        uint
+	ProductName     string
+	HostIPAddresses []string
 	AppId           uint
 	Ueimsi          string
 	PlmnID          string
@@ -97,16 +100,18 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 	if len(options.Addr) == 0 {
 		return false, errors.New("missing addr")
 	}
+	hostIPAddresses := []datatype.Address{}
+	for _, ip := range options.HostIPAddresses {
+		hostIPAddresses = append(hostIPAddresses, datatype.Address(net.ParseIP(ip)))
+	}
 	cfg := &sm.Settings{
 		OriginHost:       datatype.DiameterIdentity(options.Host),
 		OriginRealm:      datatype.DiameterIdentity(options.Realm),
 		VendorID:         datatype.Unsigned32(options.VendorId),
-		ProductName:      "xk6-diameter",
+		ProductName:      datatype.UTF8String(options.ProductName),
 		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
 		FirmwareRevision: 1,
-		HostIPAddresses: []datatype.Address{
-			datatype.Address(net.ParseIP("127.0.0.1")),
-		},
+		HostIPAddresses:  hostIPAddresses,
 	}
 	mux := sm.New(cfg)
 

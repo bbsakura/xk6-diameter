@@ -1,3 +1,4 @@
+
 /*
 example stress test for AIR and ULR
 */
@@ -18,6 +19,8 @@ export default function () {
             network_type: "sctp",
             retries: 0,
             vendor_id: 10415,
+            product_name: "xk6-diameter",
+            hostipaddresses: ["127.0.0.1"],
         });
         check(result, {
             'Connected': (result) => result == true
@@ -40,6 +43,8 @@ export default function () {
                 'Received AIR Response': (airRes) => airRes == true,
             });
         } catch (error) {
+            // If the connection fails or times out, set the check to false
+            console.log(error);
             check(null, {
                 'Received AIR Response': false,
             });
@@ -55,7 +60,8 @@ export default function () {
                 'Received ULR Response': (ulrRes) => ulrRes == true
             });
         } catch (error) {
-
+            // If the connection fails or times out, set the check to false
+            console.log(error);
             check(null, {
                 'Received ULR Response': false
             });
