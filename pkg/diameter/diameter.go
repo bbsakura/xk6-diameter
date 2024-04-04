@@ -164,13 +164,17 @@ func (c *K6DiameterClient) Close() {
 	c.Conn.Close()
 }
 
+func (c *K6DiameterClient) generateSessionID() string {
+	return "session;" + strconv.Itoa(int(rand.Uint32()))
+}
+
 func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
 		return false, errors.New("peer metadata unavailable")
 	}
 
-	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
+	sid := c.generateSessionID()
 	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
@@ -215,7 +219,7 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	if !ok {
 		return false, errors.New("peer metadata unavailable")
 	}
-	sid := "session;" + strconv.Itoa(int(rand.Uint32()))
+	sid := c.generateSessionID()
 	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
