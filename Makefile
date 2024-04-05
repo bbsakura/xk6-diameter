@@ -1,10 +1,12 @@
+
 # cf. based https://gist.github.com/thomaspoignant/5b72d579bd5f311904d973652180c705
 GOCMD=go
 GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
+BINARY_NAME=xk6-diameter
 #brunch name version
-VERSION := $(shell git rev-parse --abbrev-ref HEAD)
-DOCKER_REGISTRY?= #if set it should finished by /
+VERSION := 0.0.1
+DOCKER_REGISTRY?= ghcr.io/bbsakura/
 DIFF_FROM_BRANCH_NAME ?= origin/main
 
 ENTRY_POINT_DIR=cmd
@@ -37,6 +39,17 @@ clean: ## Remove build related file
 
 xk6build: ## Package the project
 	xk6 build --with github.com/bbsakura/xk6-diameter@latest=$(shell pwd) --output ./out/bin/xk6diameter
+
+## Docker:
+docker-build: ## Use the dockerfile to build the container
+	docker build --rm --tag $(BINARY_NAME) .
+
+docker-release: ## Release the container with tag latest and version
+	docker tag $(BINARY_NAME) $(DOCKER_REGISTRY)$(BINARY_NAME):latest
+	docker tag $(BINARY_NAME) $(DOCKER_REGISTRY)$(BINARY_NAME):$(VERSION)
+	# Push the docker images
+	docker push $(DOCKER_REGISTRY)$(BINARY_NAME):latest
+	docker push $(DOCKER_REGISTRY)$(BINARY_NAME):$(VERSION)
 
 ## Test:
 test: ## Run the tests of the project
