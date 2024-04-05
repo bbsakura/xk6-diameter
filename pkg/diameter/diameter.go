@@ -1,4 +1,3 @@
-
 package diameter
 
 import (
@@ -6,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -25,13 +25,17 @@ const version = "v0.0.1"
 type (
 	// RootModule is the global module instance that will create module
 	// instances for each VU.
-	RootModule struct{}
+	RootModule struct {
+		dialPool *sync.Map
+		mu       sync.Mutex
+	}
 
 	// ModuleInstance represents an instance of the GRPC module for every VU.
 	ModuleInstance struct {
 		Version string
 		vu      modules.VU
 		exports map[string]interface{}
+		rm      *RootModule
 	}
 )
 
@@ -40,15 +44,23 @@ var (
 	_ modules.Instance = &ModuleInstance{}
 )
 
+func New() *RootModule {
+	return &RootModule{
+		dialPool: new(sync.Map),
+	}
+}
+
 // NewModuleInstance implements the modules.Module interface to return
 // a new instance for each VU.
-func (*RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
+func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	mi := &ModuleInstance{
 		Version: version,
 		vu:      vu,
 		exports: make(map[string]interface{}),
+		rm:      rm,
 	}
 	mi.exports["K6DiameterClient"] = mi.NewK6DiameterClient
+	mi.exports["K6DiameterClientWithConnect"] = mi.NewK6DiameterClientWithConnect
 	return mi
 }
 
@@ -93,6 +105,107 @@ type K6DiameterClient struct {
 type handlerChannels struct {
 	checkAIR chan AIAResponce
 	checkULR chan ULAResponce
+}
+
+func (c *ModuleInstance) NewK6DiameterClientWithConnect(call goja.ConstructorCall) *goja.Object {
+	c.rm.mu.Lock()
+	defer c.rm.mu.Unlock()
+	op := call.Arguments[0].Export()
+	options, err := MapToConnectionOptions(op.(map[string]interface{}))
+	if err != nil {
+		panic(err)
+	}
+	cli := c.rm.connGetPool(options.Host)
+	if cli == nil {
+		cli = &K6DiameterClient{
+			vu: c.vu,
+		}
+		_, err := cli.Connect(options)
+		if err != nil {
+			panic(err)
+		}
+		c.rm.connSetPool(options.Host, cli)
+	}
+	rt := c.vu.Runtime()
+	return rt.ToValue(cli).ToObject(rt)
+}
+
+func (c *RootModule) connSetPool(host string, diam *K6DiameterClient) {
+	c.dialPool.Store(host, diam)
+}
+
+func (c *RootModule) connGetPool(host string) *K6DiameterClient {
+	if diam, ok := c.dialPool.Load(host); ok {
+		return diam.(*K6DiameterClient)
+	}
+	return nil
+}
+
+func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error) {
+	var co ConnectionOptions
+
+	if addr, ok := m["addr"].(string); ok {
+		co.Addr = addr
+	}
+	if host, ok := m["host"].(string); ok {
+		co.Host = host
+	}
+	if realm, ok := m["realm"].(string); ok {
+		co.Realm = realm
+	}
+	if networkType, ok := m["network_type"].(string); ok {
+		co.NetworkType = networkType
+	}
+
+	mapNumberToUintOpt(&co.Retries, m, "retries")
+	mapNumberToUintOpt(&co.VendorId, m, "vendor_id")
+	mapNumberToUintOpt(&co.AppId, m, "app_id")
+	mapNumberToUintOpt(&co.Vectors, m, "vectors")
+	mapNumberToUintOpt(&co.CompletionSleep, m, "completion_sleep")
+
+	if productName, ok := m["product_name"].(string); ok {
+		co.ProductName = productName
+	}
+	if hostIPAddresses, ok := m["hostipaddresses"].([]interface{}); ok {
+		for _, ip := range hostIPAddresses {
+			if ipStr, ok := ip.(string); ok {
+				co.HostIPAddresses = append(co.HostIPAddresses, ipStr)
+			}
+		}
+	}
+	if ueimsi, ok := m["ueimsi"].(string); ok {
+		co.Ueimsi = ueimsi
+	}
+	if plmnID, ok := m["plmn_id"].(string); ok {
+		co.PlmnID = plmnID
+	}
+	if sessionID, ok := m["session_id"].(string); ok {
+		co.SessionID = sessionID
+	}
+	if destinationHost, ok := m["destination_host"].(*datatype.DiameterIdentity); ok {
+		co.DestinationHost = destinationHost
+	}
+	if destinationRealm, ok := m["destination_realm"].(*datatype.DiameterIdentity); ok {
+		co.DestinationRealm = destinationRealm
+	}
+	if proxiableFlag, ok := m["proxiable_flag"].(bool); ok {
+		co.ProxiableFlag = proxiableFlag
+	}
+	if additional, ok := m["additional"].([]interface{}); ok {
+		for _, avp := range additional {
+			if avpCasted, ok := avp.(AVP); ok {
+				co.Additional = append(co.Additional, avpCasted)
+			}
+		}
+	}
+
+	return co, nil
+}
+
+func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
+	if value, ok := m[key].(int64); ok {
+		*target = uint(value)
+	}
 }
 
 func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Object {

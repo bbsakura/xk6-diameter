@@ -6,5 +6,5 @@ import (
 )
 
 func init() {
-	modules.Register("k6/x/diameter", new(diameter.RootModule))
+	modules.Register("k6/x/diameter", diameter.New())
 }
