@@ -7,13 +7,17 @@ import diameter from "k6/x/diameter";
 
 let client;
 
+export const options = {
+    tags: { name: "diameter" },
+};
+
 export default function () {
     if (client == null) {
         client = new diameter.K6DiameterClient();
     }
     try {
         const result = client.connect({
-            addr: `127.0.0.1:3868`,
+            addr: "127.0.0.1:3868",
             host: "magma-oai.openair4G.eur",
             realm: "openair4G.eur",
             network_type: "sctp",

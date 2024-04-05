@@ -20,5 +20,8 @@ func init() {
 		"Immediate-Response-Preferred":         {code: avp.ImmediateResponsePreferred, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toUnsigned32},
 		"RAT-Type":                             {code: avp.RATType, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toEnumerated},
 		"ULR-Flags":                            {code: avp.ULRFlags, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toEnumerated},
+		"Terminal-Information":                 {code: avp.TerminalInformation, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toGrouped},
+		"IMEI":                                 {code: avp.IMEI, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toUTF8String},
+		"Software-Version":                     {code: avp.SoftwareVersion, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toUTF8String},
 	}
 }

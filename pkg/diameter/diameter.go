@@ -2,6 +2,7 @@
 package diameter
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -205,7 +206,7 @@ func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (bool, error)
 	select {
 	case res := <-c.handlerChannels.checkAIR:
 		if res != nil {
-			return false, errors.New("Authentication Information Parse Error")
+			return false, res
 		}
 	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
 		return false, errors.New("Authentication Information timeout")
@@ -244,7 +245,7 @@ func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (bool, error)
 	select {
 	case res := <-c.handlerChannels.checkULR:
 		if res != nil {
-			return false, errors.New("Authentication Information Parse Error")
+			return false, res
 		}
 	case <-time.After(3 * time.Second):
 		return false, errors.New("Authentication Information timeout")
@@ -339,6 +340,11 @@ func handleAuthenticationInformationAnswer(done chan error) diam.HandlerFunc {
 			done <- errors.WithMessage(err, "AIA Unmarshal failed")
 			return
 		}
+		if aia.ResultCode != diam.Success {
+			errMsg := fmt.Sprintf("AIA Diameter Resultcode is %d", aia.ResultCode)
+			done <- errors.New(errMsg)
+			return
+		}
 		done <- nil
 	}
 }
@@ -349,6 +355,11 @@ func handleUpdateLocationAnswer(done chan error) diam.HandlerFunc {
 		err := m.Unmarshal(&ula)
 		if err != nil {
 			done <- errors.WithMessage(err, "ULA Unmarshal failed")
+			return
+		}
+		if ula.ResultCode != diam.Success {
+			errMsg := fmt.Sprintf("ULR Diameter Resultcode is %d", ula.ResultCode)
+			done <- errors.New(errMsg)
 			return
 		}
 		done <- nil
