@@ -75,12 +75,13 @@ type ConnectionOptions struct {
 	PlmnID          string
 	Vectors         uint
 	CompletionSleep uint
+	SessionID       string
 
 	DestinationHost  *datatype.DiameterIdentity
 	DestinationRealm *datatype.DiameterIdentity
 
 	ProxiableFlag bool
-	Additional []AVP
+	Additional    []AVP
 }
 
 type K6DiameterClient struct {
@@ -181,7 +182,12 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 		return false, errors.New("peer metadata unavailable")
 	}
 
-	sid := c.generateSessionID()
+	var sid string
+	if options.SessionID != "" {
+		sid = options.SessionID
+	} else {
+		sid = c.generateSessionID()
+	}
 	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
@@ -222,7 +228,12 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	if !ok {
 		return false, errors.New("peer metadata unavailable")
 	}
-	sid := c.generateSessionID()
+	var sid string
+	if options.SessionID != "" {
+		sid = options.SessionID
+	} else {
+		sid = c.generateSessionID()
+	}
 	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
