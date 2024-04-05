@@ -77,6 +77,8 @@ type ConnectionOptions struct {
 
 	DestinationHost  *datatype.DiameterIdentity
 	DestinationRealm *datatype.DiameterIdentity
+
+	Additional []AVP
 }
 
 type K6DiameterClient struct {
@@ -183,27 +185,12 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
 
-	if options.DestinationHost == nil {
-		m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
-	} else if *options.DestinationHost != "" {
-		m.NewAVP(avp.DestinationHost, avp.Mbit, 0, *options.DestinationHost)
+	modifyMessage(m, meta, options)
+	err := appendAVPs(m, meta, options.Additional)
+	if err != nil {
+		log.Println(err)
 	}
-	if options.DestinationRealm == nil {
-		m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
-	} else {
-		m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, *options.DestinationRealm)
-	}
-	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(options.Ueimsi))
-	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(0))
-	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.OctetString(options.PlmnID))
-	m.NewAVP(avp.RequestedEUTRANAuthenticationInfo, avp.Vbit|avp.Mbit, uint32(options.VendorId), &diam.GroupedAVP{
-		AVP: []*diam.AVP{
-			diam.NewAVP(
-				avp.NumberOfRequestedVectors, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(options.Vectors)),
-			diam.NewAVP(
-				avp.ImmediateResponsePreferred, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(0)),
-		},
-	})
+
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return false, errors.WithMessage(err, "write message fail")
 	}
@@ -236,13 +223,13 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
-	m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
-	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(options.Ueimsi))
-	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(0))
-	m.NewAVP(avp.RATType, avp.Mbit, uint32(options.VendorId), datatype.Enumerated(1004))
-	m.NewAVP(avp.ULRFlags, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.Unsigned32(ULR_FLAGS))
-	m.NewAVP(avp.VisitedPLMNID, avp.Vbit|avp.Mbit, uint32(options.VendorId), datatype.OctetString(options.PlmnID))
+
+	modifyMessage(m, meta, options)
+	err := appendAVPs(m, meta, options.Additional)
+	if err != nil {
+		log.Println(err)
+	}
+
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return false, errors.WithMessage(err, "write message fail")
 	}
