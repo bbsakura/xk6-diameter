@@ -105,6 +105,7 @@ type K6DiameterClient struct {
 type handlerChannels struct {
 	checkAIR chan AIAResponce
 	checkULR chan ULAResponce
+	checkCLA chan CLAResponce
 }
 
 func (c *ModuleInstance) NewK6DiameterClientWithConnect(call goja.ConstructorCall) *goja.Object {
@@ -269,6 +270,9 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: false},
 		handleUpdateLocationAnswer(c.handlerChannels.checkULR))
 
+	c.handlerChannels.checkCLA = make(chan CLAResponce, 1000)
+
+	mux.HandleIdx(diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true}, handleCancelLocationAnswer(c.handlerChannels.checkCLA))
 	// Catch All
 	mux.HandleIdx(diam.ALL_CMD_INDEX, handleAll())
 
@@ -381,6 +385,18 @@ func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (int64, error
 	}
 }
 
+func (c *K6DiameterClient) CheckCLA(wait int64) (int64, error) {
+	select {
+	case res := <-c.handlerChannels.checkCLA:
+		if res.Error != nil {
+			return 0, res.Error
+		}
+		return int64(res.CLA.ResultCode), nil
+	case <-time.After(time.Duration(wait) * time.Second):
+		return 0, errors.New("Cancel Location timeout")
+	}
+}
+
 // S6a/S6d-Indicator | Initial-AttachIndicator
 const ULR_FLAGS = 1<<1 | 1<<5
 
@@ -460,12 +476,25 @@ type ULA struct {
 	ExperimentalResult ExperimentalResult        `avp:"Experimental-Result"`
 }
 
+type CLA struct {
+	SessionId        string                    `avp:"Session-Id"`
+	AuthSessionState int32                     `avp:"Auth-Session-State"`
+	ResultCode       uint32                    `avp:"Result-Code"`
+	OriginHost       datatype.DiameterIdentity `avp:"Origin-Host"`
+	OriginRealm      datatype.DiameterIdentity `avp:"Origin-Realm"`
+}
+
 type AIAResponce struct {
 	AIA   AIA
 	Error error
 }
 type ULAResponce struct {
 	ULA   ULA
+	Error error
+}
+
+type CLAResponce struct {
+	CLA   CLA
 	Error error
 }
 
@@ -490,6 +519,18 @@ func handleUpdateLocationAnswer(done chan ULAResponce) diam.HandlerFunc {
 			return
 		}
 		done <- ULAResponce{ULA: ula, Error: nil}
+	}
+}
+
+func handleCancelLocationAnswer(done chan CLAResponce) diam.HandlerFunc {
+	return func(c diam.Conn, m *diam.Message) {
+		var cla CLA
+		err := m.Unmarshal(&cla)
+		if err != nil {
+			done <- CLAResponce{Error: errors.WithMessage(err, "CLA Unmarshal failed")}
+			return
+		}
+		done <- CLAResponce{CLA: cla, Error: nil}
 	}
 }
 
