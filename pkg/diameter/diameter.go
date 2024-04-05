@@ -2,7 +2,6 @@
 package diameter
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -92,8 +91,8 @@ type K6DiameterClient struct {
 }
 
 type handlerChannels struct {
-	checkAIR chan error
-	checkULR chan error
+	checkAIR chan AIAResponce
+	checkULR chan ULAResponce
 }
 
 func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Object {
@@ -147,12 +146,12 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 		return false, errors.WithMessage(err, "Dial error")
 	}
 	// set MessageHandler
-	c.handlerChannels.checkAIR = make(chan error, 1000)
+	c.handlerChannels.checkAIR = make(chan AIAResponce, 1000)
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: false},
 		handleAuthenticationInformationAnswer(c.handlerChannels.checkAIR))
 
-	c.handlerChannels.checkULR = make(chan error, 1000)
+	c.handlerChannels.checkULR = make(chan ULAResponce, 1000)
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: false},
 		handleUpdateLocationAnswer(c.handlerChannels.checkULR))
@@ -208,19 +207,19 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	return true, nil
 }
 
-func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (bool, error) {
+func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (int64, error) {
 	if _, err := c.SendAIR(options); err != nil {
-		return false, err
+		return 0, err
 	}
 	select {
 	case res := <-c.handlerChannels.checkAIR:
-		if res != nil {
-			return false, res
+		if res.Error != nil {
+			return 0, res.Error
 		}
+		return int64(res.AIA.ResultCode), nil
 	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
-		return false, errors.New("Authentication Information timeout")
+		return 0, errors.New("Authentication Information timeout")
 	}
-	return true, nil
 }
 
 func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
@@ -254,19 +253,19 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	return true, nil
 }
 
-func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (bool, error) {
+func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (int64, error) {
 	if _, err := c.SendULR(options); err != nil {
-		return false, err
+		return 0, err
 	}
 	select {
 	case res := <-c.handlerChannels.checkULR:
-		if res != nil {
-			return false, res
+		if res.Error != nil {
+			return 0, res.Error
 		}
-	case <-time.After(3 * time.Second):
-		return false, errors.New("Authentication Information timeout")
+		return int64(res.ULA.ResultCode), nil
+	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+		return 0, errors.New("Authentication Information timeout")
 	}
-	return true, nil
 }
 
 // S6a/S6d-Indicator | Initial-AttachIndicator
@@ -348,37 +347,36 @@ type ULA struct {
 	ExperimentalResult ExperimentalResult        `avp:"Experimental-Result"`
 }
 
-func handleAuthenticationInformationAnswer(done chan error) diam.HandlerFunc {
+type AIAResponce struct {
+	AIA   AIA
+	Error error
+}
+type ULAResponce struct {
+	ULA   ULA
+	Error error
+}
+
+func handleAuthenticationInformationAnswer(done chan AIAResponce) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		var aia AIA
 		err := m.Unmarshal(&aia)
 		if err != nil {
-			done <- errors.WithMessage(err, "AIA Unmarshal failed")
+			done <- AIAResponce{Error: errors.WithMessage(err, "AIA Unmarshal failed")}
 			return
 		}
-		if aia.ResultCode != diam.Success {
-			errMsg := fmt.Sprintf("AIA Diameter Resultcode is %d", aia.ResultCode)
-			done <- errors.New(errMsg)
-			return
-		}
-		done <- nil
+		done <- AIAResponce{AIA: aia, Error: nil}
 	}
 }
 
-func handleUpdateLocationAnswer(done chan error) diam.HandlerFunc {
+func handleUpdateLocationAnswer(done chan ULAResponce) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		var ula ULA
 		err := m.Unmarshal(&ula)
 		if err != nil {
-			done <- errors.WithMessage(err, "ULA Unmarshal failed")
+			done <- ULAResponce{Error: errors.WithMessage(err, "ULA Unmarshal failed")}
 			return
 		}
-		if ula.ResultCode != diam.Success {
-			errMsg := fmt.Sprintf("ULR Diameter Resultcode is %d", ula.ResultCode)
-			done <- errors.New(errMsg)
-			return
-		}
-		done <- nil
+		done <- ULAResponce{ULA: ula, Error: nil}
 	}
 }
 
