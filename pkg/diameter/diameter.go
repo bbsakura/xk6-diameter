@@ -79,6 +79,7 @@ type ConnectionOptions struct {
 	DestinationHost  *datatype.DiameterIdentity
 	DestinationRealm *datatype.DiameterIdentity
 
+	ProxiableFlag bool
 	Additional []AVP
 }
 
@@ -185,7 +186,9 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-
+	if options.ProxiableFlag {
+		m.Header.CommandFlags = m.Header.CommandFlags | diam.ProxiableFlag
+	}
 	modifyMessage(m, meta, options)
 	err := appendAVPs(m, meta, options.Additional)
 	if err != nil {
@@ -224,7 +227,9 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-
+	if options.ProxiableFlag {
+		m.Header.CommandFlags = m.Header.CommandFlags | diam.ProxiableFlag
+	}
 	modifyMessage(m, meta, options)
 	err := appendAVPs(m, meta, options.Additional)
 	if err != nil {
