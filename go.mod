@@ -5,7 +5,7 @@ go 1.21
 toolchain go1.22.4
 
 require (
-	github.com/dmarkham/enumer v1.5.9
+	github.com/dmarkham/enumer v1.5.10
 	github.com/dop251/goja v0.0.0-20240610225006-393f6d42497b
 	github.com/elisescu/tty-share v0.6.2
 	github.com/erkanzileli/co-author v0.0.7
