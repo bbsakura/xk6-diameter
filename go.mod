@@ -11,7 +11,7 @@ require (
 	github.com/erkanzileli/co-author v0.0.7
 	github.com/fiorix/go-diameter/v4 v4.0.4
 	github.com/pkg/errors v0.9.1
-	go.k6.io/k6 v0.51.0
+	go.k6.io/k6 v0.52.0
 	go.k6.io/xk6 v0.11.0
 	golang.org/x/tools v0.22.0
 	honnef.co/go/tools v0.4.7
@@ -28,11 +28,13 @@ require (
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/dlclark/regexp2 v1.9.0 // indirect
 	github.com/elisescu/pty v1.0.2 // indirect
+	github.com/evanw/esbuild v0.21.2 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230728192033-2ba5b33183c6 // indirect
+	github.com/grafana/sobek v0.0.0-20240613124309-cb36746e8fee // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20190922091402-408ec287e38c // indirect

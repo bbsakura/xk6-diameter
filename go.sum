@@ -38,6 +38,8 @@ github.com/elisescu/tty-share v0.6.2 h1:7zKCWpItawjQijWbbsqHbP9GwKAUbMu/eKCsxQp6
 github.com/elisescu/tty-share v0.6.2/go.mod h1:kpH7vnO1qibAddO6oYcSIaDQWXuYRUbN23cgr1zYhAY=
 github.com/erkanzileli/co-author v0.0.7 h1:JTef0rovlTNXVJ4IWSXdRtDx1rfY3yTvwed0CkOonpI=
 github.com/erkanzileli/co-author v0.0.7/go.mod h1:GtE36TZg+SUUTrws6FLKNvM6PWOXRKv6N6tJUTZY8fY=
+github.com/evanw/esbuild v0.21.2 h1:CLplcGi794CfHLVmUbvVfTMKkykm+nyIHU8SU60KUTA=
+github.com/evanw/esbuild v0.21.2/go.mod h1:D2vIQZqV/vIf/VRHtViaUtViZmG7o+kKmlBfVQuRi48=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
 github.com/fiorix/go-diameter/v4 v4.0.4 h1:/nw5zEmEW7pmP9YUYjOfU1GomR0LupKdYy52yd1j3NM=
@@ -74,6 +76,8 @@ github.com/google/pprof v0.0.0-20230728192033-2ba5b33183c6 h1:ZgoomqkdjGbQ3+qQXC
 github.com/google/pprof v0.0.0-20230728192033-2ba5b33183c6/go.mod h1:Jh3hGz2jkYak8qXPD19ryItVnUgpgeqzdkY/D0EaeuA=
 github.com/gorilla/websocket v1.5.1 h1:gmztn0JnHVt9JZquRuzLw3g4wouNVzKL15iLr/zn/QY=
 github.com/gorilla/websocket v1.5.1/go.mod h1:x3kM2JMyaluk02fnUJpQuwD2dCS5NDG2ZHL0uE0tcaY=
+github.com/grafana/sobek v0.0.0-20240613124309-cb36746e8fee h1:KjQPRiLoSZMz+oMdEyh8fE/rurMpx3lpRH8PIR66nzo=
+github.com/grafana/sobek v0.0.0-20240613124309-cb36746e8fee/go.mod h1:4uA93vCOP7fFfkAEByuRieuU72pAc5DH05b71yCIVsQ=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0 h1:Wqo399gCIufwto+VfwCSvsnfGpF/w5E9CNxSwbpD6No=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0/go.mod h1:qmOFXW2epJhM0qSnUUYpldc7gVz2KMQwJ/QYCDIa7XU=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
@@ -166,8 +170,8 @@ github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
-go.k6.io/k6 v0.51.0 h1:TdMpPNwYuvtmBF1APoKFHuMnNzdIMI/XLaPklSjrIUw=
-go.k6.io/k6 v0.51.0/go.mod h1:72d4MKuvKiRnkbPBGOk/gbz1aAcbKycX+GIlU7IOpuA=
+go.k6.io/k6 v0.52.0 h1:VrwjSCrM4v61UptCeTPJjYE+Ebyy3xbtqVuAFYGVM2c=
+go.k6.io/k6 v0.52.0/go.mod h1:Dr6udC+rZxT0Wu5wU98eOYpABU4e0Gc5Dx4MC5anJO8=
 go.k6.io/xk6 v0.11.0 h1:RKmnLhk9BT4n34Q6Qb3nALMmPScOKXXAeEtFU2BFE/s=
 go.k6.io/xk6 v0.11.0/go.mod h1:4+BwjriwZ52roJ9RHHQhTBb9Q6ZctEUtsCO10H8rJIo=
 go.opentelemetry.io/otel v1.24.0 h1:0LAOdjNmQeSTzGBzduGe/rU4tZhMwL5rWgtp9Ku5Jfo=
