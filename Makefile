@@ -5,7 +5,7 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 BINARY_NAME=xk6-diameter
 #brunch name version
-VERSION := 0.0.1
+VERSION := v0.0.1
 DOCKER_REGISTRY?= ghcr.io/bbsakura/
 DIFF_FROM_BRANCH_NAME ?= origin/main
 

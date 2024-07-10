@@ -1,19 +1,22 @@
 # xk6-diameter
-Client extension for interacting with a use Diameter proto of your k6 test.
+Client extension for interacting with a Diameter protocol in your k6 test.
 
-🚧 This project WIP... 🚧
+🚧 This project is a work in progress... 🚧
 
-## Prepair
-require asdf installed.
-[how to asdf install](https://asdf-vm.com/guide/getting-started.html#_2-download-asdf)
+## Preparation
+
+Requires asdf to be installed.
+[How to install asdf](https://asdf-vm.com/guide/getting-started.html#_2-download-asdf)
 
 Install tools required for development.
-```shell=
+
+```shell
 make install-dev-pkg
 ```
 
 ## Build
-```shell=
+
+```shell
 make install-go-tools
 make build
 ```
@@ -31,10 +34,10 @@ make build
 ## Developers Settings
 
 ```shell
-# fmt, lint, commitmessage validate...etc checker
+# Format, lint, commit message validation, etc.
 pre-commit install
 
-# mob programing
+# Mob programming
 co-author hook > .git/hooks/prepare-commit-msg
 chmod +x .git/hooks/prepare-commit-msg
 ```
