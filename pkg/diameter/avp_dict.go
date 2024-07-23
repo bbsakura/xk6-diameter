@@ -1,4 +1,3 @@
-
 package diameter
 
 import (

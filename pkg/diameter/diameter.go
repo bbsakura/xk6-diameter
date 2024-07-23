@@ -293,6 +293,7 @@ func (c *K6DiameterClient) generateSessionID() string {
 }
 
 func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
+	var err error
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
 		return false, errors.New("peer metadata unavailable")
@@ -305,14 +306,26 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 		sid = c.generateSessionID()
 	}
 	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
-	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
-	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
-	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-	if options.ProxiableFlag {
-		m.Header.CommandFlags = m.Header.CommandFlags | diam.ProxiableFlag
+	_, err = m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP SessionID failed")
 	}
-	modifyMessage(m, meta, options)
-	err := appendAVPs(m, meta, options.Additional)
+	_, err = m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP OriginHost failed")
+	}
+	_, err = m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP OriginRealm failed")
+	}
+	if options.ProxiableFlag {
+		m.Header.CommandFlags |= diam.ProxiableFlag
+	}
+	err = modifyMessage(m, meta, options)
+	if err != nil {
+		log.Println(err)
+	}
+	err = appendAVPs(m, meta, options.Additional)
 	if err != nil {
 		log.Println(err)
 	}
@@ -340,6 +353,7 @@ func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (int64, error
 }
 
 func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
+	var err error
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
 		return false, errors.New("peer metadata unavailable")
@@ -351,14 +365,26 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 		sid = c.generateSessionID()
 	}
 	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
-	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
-	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
-	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-	if options.ProxiableFlag {
-		m.Header.CommandFlags = m.Header.CommandFlags | diam.ProxiableFlag
+	_, err = m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP SessionID failed")
 	}
-	modifyMessage(m, meta, options)
-	err := appendAVPs(m, meta, options.Additional)
+	_, err = m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP OriginHost failed")
+	}
+	_, err = m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
+	if err != nil {
+		return false, errors.WithMessage(err, "NewAVP OriginRealm failed")
+	}
+	if options.ProxiableFlag {
+		m.Header.CommandFlags |= diam.ProxiableFlag
+	}
+	err = modifyMessage(m, meta, options)
+	if err != nil {
+		log.Println(err)
+	}
+	err = appendAVPs(m, meta, options.Additional)
 	if err != nil {
 		log.Println(err)
 	}
