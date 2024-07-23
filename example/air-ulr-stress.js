@@ -55,7 +55,7 @@ export default function () {
                 ],
             });
             check(airRes, {
-                "Received AIR Response": (airRes) => airRes == true,
+                "Received AIR Response": (airRes) => airRes == 2001,
             });
         } catch (error) {
             // If the connection fails or times out, set the check to false
@@ -85,7 +85,7 @@ export default function () {
                 ],
             });
             check(ulrRes, {
-                "Received ULR Response": (ulrRes) => ulrRes == true,
+                "Received ULR Response": (ulrRes) => ulrRes == 2001,
             });
         } catch (error) {
             // If the connection fails or times out, set the check to false
