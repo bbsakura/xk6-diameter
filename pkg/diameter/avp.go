@@ -15,7 +15,14 @@ type AVP struct {
 	Value interface{}
 }
 
-type AvpMeta struct {
+type AVPMeta struct {
+	code   uint32
+	flag   uint8
+	vendor uint32
+	value  datatype.Type
+}
+
+type AVPMetaC struct {
 	code      uint32
 	flag      uint8
 	vendor    uint32

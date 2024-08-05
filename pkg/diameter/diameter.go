@@ -306,17 +306,16 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 		sid = c.generateSessionID()
 	}
 	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
-	_, err = m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP SessionID failed")
+	avps := []AVPMeta{
+		{code: avp.SessionID, flag: avp.Mbit, vendor: 0, value: datatype.UTF8String(sid)},
+		{code: avp.OriginHost, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginHost},
+		{code: avp.OriginRealm, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginRealm},
 	}
-	_, err = m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP OriginHost failed")
-	}
-	_, err = m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP OriginRealm failed")
+	for _, avp := range avps {
+		_, err = m.NewAVP(avp.code, avp.flag, avp.vendor, avp.value)
+		if err != nil {
+			return false, errors.WithMessage(err, "NewAVP failed")
+		}
 	}
 	if options.ProxiableFlag {
 		m.Header.CommandFlags |= diam.ProxiableFlag
@@ -365,17 +364,16 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 		sid = c.generateSessionID()
 	}
 	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
-	_, err = m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sid))
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP SessionID failed")
+	avps := []AVPMeta{
+		{code: avp.SessionID, flag: avp.Mbit, vendor: 0, value: datatype.UTF8String(sid)},
+		{code: avp.OriginHost, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginHost},
+		{code: avp.OriginRealm, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginRealm},
 	}
-	_, err = m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.cfg.OriginHost)
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP OriginHost failed")
-	}
-	_, err = m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.cfg.OriginRealm)
-	if err != nil {
-		return false, errors.WithMessage(err, "NewAVP OriginRealm failed")
+	for _, avp := range avps {
+		_, err = m.NewAVP(avp.code, avp.flag, avp.vendor, avp.value)
+		if err != nil {
+			return false, errors.WithMessage(err, "NewAVP failed")
+		}
 	}
 	if options.ProxiableFlag {
 		m.Header.CommandFlags |= diam.ProxiableFlag
