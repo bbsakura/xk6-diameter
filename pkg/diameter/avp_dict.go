@@ -1,17 +1,16 @@
-
 package diameter
 
 import (
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 )
 
-var avpDict map[string]*AvpMeta
+var avpDict map[string]*AVPMetaC
 
 const vendorId3GPP = 10415
 
 func init() {
 	// TODO: generate this part from XML dictionary files
-	avpDict = map[string]*AvpMeta{
+	avpDict = map[string]*AVPMetaC{
 		"User-Name":                            {code: avp.UserName, flag: avp.Mbit, vendor: 0, converter: toUTF8String},
 		"Auth-Session-State":                   {code: avp.AuthSessionState, flag: avp.Mbit, vendor: 0, converter: toEnumerated},
 		"Visited-PLMN-Id":                      {code: avp.VisitedPLMNID, flag: avp.Vbit | avp.Mbit, vendor: vendorId3GPP, converter: toOctetString},

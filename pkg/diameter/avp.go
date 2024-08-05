@@ -1,4 +1,3 @@
-
 package diameter
 
 import (
@@ -16,7 +15,14 @@ type AVP struct {
 	Value interface{}
 }
 
-type AvpMeta struct {
+type AVPMeta struct {
+	code   uint32
+	flag   uint8
+	vendor uint32
+	value  datatype.Type
+}
+
+type AVPMetaC struct {
 	code      uint32
 	flag      uint8
 	vendor    uint32
@@ -32,7 +38,10 @@ func (pair *AVP) modifyMessage(m *diam.Message, meta *smpeer.Metadata) error {
 	if err != nil {
 		return err
 	}
-	m.NewAVP(pair.Key, avpMeta.flag, avpMeta.vendor, val)
+	_, err = m.NewAVP(pair.Key, avpMeta.flag, avpMeta.vendor, val)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -50,15 +59,28 @@ func appendAVPs(m *diam.Message, meta *smpeer.Metadata, avps []AVP) error {
 	return nil
 }
 
-func modifyMessage(m *diam.Message, meta *smpeer.Metadata, options ConnectionOptions) {
+func modifyMessage(m *diam.Message, meta *smpeer.Metadata, options ConnectionOptions) error {
 	if options.DestinationHost == nil {
-		m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
+		_, err := m.NewAVP(avp.DestinationHost, avp.Mbit, 0, meta.OriginHost)
+		if err != nil {
+			return err
+		}
 	} else if *options.DestinationHost != "" {
-		m.NewAVP(avp.DestinationHost, avp.Mbit, 0, *options.DestinationHost)
+		_, err := m.NewAVP(avp.DestinationHost, avp.Mbit, 0, *options.DestinationHost)
+		if err != nil {
+			return err
+		}
 	}
 	if options.DestinationRealm == nil {
-		m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
+		_, err := m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
+		if err != nil {
+			return err
+		}
 	} else {
-		m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, *options.DestinationRealm)
+		_, err := m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, *options.DestinationRealm)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
