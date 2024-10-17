@@ -1,9 +1,5 @@
 run:
   timeout: 15m
-  skip-files:
-    - tools.go
-    - cmd/hss-client/main.go
-    - cmd/hss-server/main.go
 
 output:
   sort-results: true
@@ -29,6 +25,10 @@ issues:
     - path: tools.go
       linters:
         - stylecheck
+  exclude-files:
+    - tools.go
+    - cmd/hss-client/main.go
+    - cmd/hss-server/main.go
 
 linters-settings:
   depguard:
