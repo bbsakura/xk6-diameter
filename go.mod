@@ -13,7 +13,7 @@ require (
 	github.com/golangci/golangci-lint v1.59.1
 	github.com/pkg/errors v0.9.1
 	go.k6.io/k6 v0.52.0
-	go.k6.io/xk6 v0.11.0
+	go.k6.io/xk6 v0.13.0
 	golang.org/x/tools v0.26.0
 	honnef.co/go/tools v0.4.7
 )
