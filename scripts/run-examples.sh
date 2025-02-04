@@ -6,6 +6,8 @@
 pkill hss-server
 ./out/bin/hss-server -network_type sctp >/dev/null 2>&1 &
 
+sleep 2
+
 function cleanup() {
     echo [INFO] pkill hss-server
     pkill hss-server
