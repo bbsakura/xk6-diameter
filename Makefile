@@ -75,6 +75,11 @@ install-dev-pkg: ## install .tool-version
 	awk '{print $$1}' .tool-versions  | xargs -I{} asdf plugin add {} || true
 	asdf install
 
+# go-dependency-sync
+go-dep-sync:
+	go install github.com/grafana/go-depsync@latest
+	go-depsync --gomod go.mod --parent go.k6.io/k6 2| sh
+
 ## Help:
 help: ## Show this help.
 	@echo ''
