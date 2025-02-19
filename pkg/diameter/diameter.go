@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
 	"github.com/pkg/errors"
 	"go.k6.io/k6/js/modules"
 
@@ -108,7 +108,7 @@ type handlerChannels struct {
 	checkCLA chan CLAResponce
 }
 
-func (c *ModuleInstance) NewK6DiameterClientWithConnect(call goja.ConstructorCall) *goja.Object {
+func (c *ModuleInstance) NewK6DiameterClientWithConnect(call sobek.ConstructorCall) *sobek.Object {
 	c.rm.mu.Lock()
 	defer c.rm.mu.Unlock()
 	op := call.Arguments[0].Export()
@@ -209,7 +209,7 @@ func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
 	}
 }
 
-func (c *ModuleInstance) NewK6DiameterClient(call goja.ConstructorCall) *goja.Object {
+func (c *ModuleInstance) NewK6DiameterClient(call sobek.ConstructorCall) *sobek.Object {
 	rt := c.vu.Runtime()
 	cli := &K6DiameterClient{
 		vu: c.vu,
