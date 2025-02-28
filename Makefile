@@ -38,7 +38,7 @@ clean: ## Remove build related file
 	rm -fr ./out/bin
 
 xk6build: ## Package the project
-	xk6 build --with github.com/bbsakura/xk6-diameter@latest=$(shell pwd) --output ./out/bin/xk6diameter
+	xk6 build --with github.com/bbsakura/xk6-diameter@latest=$(shell pwd) --output ./out/bin/xk6
 
 ## Docker:
 docker-build: ## Use the dockerfile to build the container
