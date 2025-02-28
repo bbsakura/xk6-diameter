@@ -9,5 +9,17 @@
       "matchManagers": ["gomod"],
       "enabled": false
     }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^scripts/install-go-tools.sh$"
+      ],
+      "matchStrings": [
+        "go install (?<depName>[^@]+?)@(?<currentValue>.+)\n"
+      ],
+      "datasourceTemplate": "go"
+    }
   ]
 }
