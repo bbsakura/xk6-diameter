@@ -17,7 +17,7 @@
         "^scripts/install-go-tools.sh$"
       ],
       "matchStrings": [
-        "go install ^(?!.*xk6)(?<depName>[^@]+?)@(?<currentValue>.+)\n"
+        "go install (?<depName>[^@]+?)(?<!xk6)@(?<currentValue>.+)\n"
       ],
       "datasourceTemplate": "go"
     }
