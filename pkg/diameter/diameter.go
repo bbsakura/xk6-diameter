@@ -81,6 +81,7 @@ type ConnectionOptions struct {
 	VendorId        uint
 	ProductName     string
 	HostIPAddresses []string
+	LocalAddr       string
 	AppId           uint
 	Ueimsi          string
 	PlmnID          string
@@ -254,8 +255,16 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 			}),
 		},
 	}
-
-	conn, err := cli.DialNetwork(options.NetworkType, options.Addr)
+	var conn diam.Conn
+	var err error
+	if options.NetworkType == "sctp" {
+		if options.LocalAddr == "" {
+			return false, errors.New("missing local addr")
+		}
+		conn, err = startReceiverSCTP(cli, options.NetworkType, options.LocalAddr, options.Addr)
+	} else {
+		conn, err = cli.DialNetwork(options.NetworkType, options.Addr)
+	}
 	if err != nil {
 		return false, errors.WithMessage(err, "Dial error")
 	}

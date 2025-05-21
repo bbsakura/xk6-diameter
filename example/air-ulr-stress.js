@@ -18,6 +18,7 @@ export default function () {
     try {
         const result = client.connect({
             addr: "127.0.0.1:3868",
+            local_addr: "127.0.0.1:0",
             host: "magma-oai.openair4G.eur",
             realm: "openair4G.eur",
             network_type: "sctp",

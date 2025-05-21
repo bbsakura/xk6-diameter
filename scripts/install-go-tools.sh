@@ -1,4 +1,4 @@
-#!bash
+#!/bin/sh
 
 go install github.com/dmarkham/enumer@v1.5.11
 go install github.com/elisescu/tty-share@v0.6.2
