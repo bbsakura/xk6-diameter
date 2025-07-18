@@ -1,12 +1,11 @@
 # xk6-diameter
 Client extension for interacting with a Diameter protocol in your k6 test.
 
-🚧 This project is a work in progress... 🚧
 
 ## Preparation
 
-Requires asdf to be installed.
-[How to install asdf](https://asdf-vm.com/guide/getting-started.html#_2-download-asdf)
+Requires mise to be installed.
+[How to install mise](https://github.com/jdx/mise?tab=readme-ov-file#install-mise)
 
 Install tools required for development.
 
