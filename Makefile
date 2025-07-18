@@ -72,8 +72,7 @@ go-gen: ## go:generate invocations
 
 ## ASDF:
 install-dev-pkg: ## install .tool-version
-	awk '{print $$1}' .tool-versions  | xargs -I{} asdf plugin add {} || true
-	asdf install
+	mise install
 
 # go-dependency-sync
 go-dep-sync:
