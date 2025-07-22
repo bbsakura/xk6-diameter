@@ -6,7 +6,7 @@ require (
 	github.com/fiorix/go-diameter/v4 v4.0.4
 	github.com/grafana/sobek v0.0.0-20241024150027-d91f02b05e9b
 	github.com/pkg/errors v0.9.1
-	go.k6.io/k6 v0.57.0
+	go.k6.io/k6 v0.59.0
 )
 
 require (
