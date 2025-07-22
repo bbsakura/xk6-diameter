@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1](https://github.com/bbsakura/xk6-diameter/compare/v0.1.0...v0.1.1) (2025-07-22)
+
+
+### Bug Fixes
+
+* remove github.com/grafana/xk6-output-prometheus-remote ([eadb57e](https://github.com/bbsakura/xk6-diameter/commit/eadb57e875b218715e584e9178d788cdc095c439))
+* remove github.com/grafana/xk6-output-prometheus-remote ([1990539](https://github.com/bbsakura/xk6-diameter/commit/19905397c5261d3e707f2a97fc2cbc315ef640cc))
+* update extends path in renovate configuration ([54dfbfe](https://github.com/bbsakura/xk6-diameter/commit/54dfbfe7e7d315b311d81cdffb6ff73aaae59b90))
+* update extends path in renovate configuration ([4a8b129](https://github.com/bbsakura/xk6-diameter/commit/4a8b129bcd49bae5e062c2d762d31dedc0d04a78))
+* update regex in renovate.json ([e0c0f4c](https://github.com/bbsakura/xk6-diameter/commit/e0c0f4ceecda1e25ae9da04515c12d2cb86f33cf))
+* update regex in renovate.json ([664af51](https://github.com/bbsakura/xk6-diameter/commit/664af51d569f5e2ec54e21cae2b5311291ac50ae))
+* update regex in renovate.json ([40d5a92](https://github.com/bbsakura/xk6-diameter/commit/40d5a926d0f169713d9b8766ae3c33d2fb7e115d))
+* update regex in renovate.json ([635ecce](https://github.com/bbsakura/xk6-diameter/commit/635eccea408fd2c43feb74db4db113418bbc1521))
+* update regex to exclude xk6 in install-go-tools.sh match ([d68c1f8](https://github.com/bbsakura/xk6-diameter/commit/d68c1f8bbd2a4221faaf723040ec7ee8e995763c))
+* update regex to exclude xk6 in install-go-tools.sh match ([502b0d3](https://github.com/bbsakura/xk6-diameter/commit/502b0d3c803a3487f0915e17da817cfac8f87e16))
+
 ## [0.1.0](https://github.com/bbsakura/xk6-diameter/compare/v0.0.1...v0.1.0) (2025-02-28)
 
 
