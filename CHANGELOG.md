@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.1](https://github.com/bbsakura/xk6-diameter/compare/v0.1.0...v0.1.1) (2025-08-22)
+
+
+### Bug Fixes
+
+* **deps:** update module go.k6.io/k6 to v1.2.1 ([#64](https://github.com/bbsakura/xk6-diameter/issues/64)) ([85ea197](https://github.com/bbsakura/xk6-diameter/commit/85ea197ec35d862bdd362e0fd7edeb29a1a7076c))
+* **deps:** update module go.k6.io/k6 to v1.2.2 ([#66](https://github.com/bbsakura/xk6-diameter/issues/66)) ([af6f876](https://github.com/bbsakura/xk6-diameter/commit/af6f876540b99a4bddd10bf6bd8f9145a6d26851))
+* remove github.com/grafana/xk6-output-prometheus-remote ([eadb57e](https://github.com/bbsakura/xk6-diameter/commit/eadb57e875b218715e584e9178d788cdc095c439))
+* remove github.com/grafana/xk6-output-prometheus-remote ([1990539](https://github.com/bbsakura/xk6-diameter/commit/19905397c5261d3e707f2a97fc2cbc315ef640cc))
+* update extends path in renovate configuration ([54dfbfe](https://github.com/bbsakura/xk6-diameter/commit/54dfbfe7e7d315b311d81cdffb6ff73aaae59b90))
+* update extends path in renovate configuration ([4a8b129](https://github.com/bbsakura/xk6-diameter/commit/4a8b129bcd49bae5e062c2d762d31dedc0d04a78))
+* update golangci-lint to v8 and fix golangci-lint install script ([a32e823](https://github.com/bbsakura/xk6-diameter/commit/a32e823cf2cbb85729038094125a1b358e4b1736))
+* update golangci-lint to v8 and fix golangci-lint install script ([0c8bf68](https://github.com/bbsakura/xk6-diameter/commit/0c8bf682fb9fb2e46c715be38d1f6d57033e20de))
+* update regex in renovate.json ([e0c0f4c](https://github.com/bbsakura/xk6-diameter/commit/e0c0f4ceecda1e25ae9da04515c12d2cb86f33cf))
+* update regex in renovate.json ([664af51](https://github.com/bbsakura/xk6-diameter/commit/664af51d569f5e2ec54e21cae2b5311291ac50ae))
+* update regex in renovate.json ([40d5a92](https://github.com/bbsakura/xk6-diameter/commit/40d5a926d0f169713d9b8766ae3c33d2fb7e115d))
+* update regex in renovate.json ([635ecce](https://github.com/bbsakura/xk6-diameter/commit/635eccea408fd2c43feb74db4db113418bbc1521))
+* update regex to exclude xk6 in install-go-tools.sh match ([d68c1f8](https://github.com/bbsakura/xk6-diameter/commit/d68c1f8bbd2a4221faaf723040ec7ee8e995763c))
+* update regex to exclude xk6 in install-go-tools.sh match ([502b0d3](https://github.com/bbsakura/xk6-diameter/commit/502b0d3c803a3487f0915e17da817cfac8f87e16))
+
 ## [0.1.0](https://github.com/bbsakura/xk6-diameter/compare/v0.0.1...v0.1.0) (2025-02-28)
 
 
