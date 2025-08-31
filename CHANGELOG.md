@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/bbsakura/xk6-diameter/compare/v0.1.1...v0.1.2) (2025-08-31)
+
+
+### Bug Fixes
+
+* **deps:** update module go.k6.io/k6 to v1.2.3 ([#72](https://github.com/bbsakura/xk6-diameter/issues/72)) ([e07ded2](https://github.com/bbsakura/xk6-diameter/commit/e07ded20ad2dfb349eb3d0a0edf3a9261a06a504))
+
 ## [0.1.1](https://github.com/bbsakura/xk6-diameter/compare/v0.1.0...v0.1.1) (2025-08-22)
 
 
