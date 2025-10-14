@@ -1,7 +1,7 @@
 ARG XK6_VERSION
 ARG K6_PROMTHEUS_VERSION
 
-FROM golang:1.25.2 AS builder
+FROM golang:1.25.3 AS builder
 ARG XK6_VERSION=v0.13.4
 
 WORKDIR $GOPATH/src/go.k6.io/k6
