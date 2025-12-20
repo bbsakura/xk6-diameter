@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/bbsakura/xk6-diameter/compare/v0.1.1...v0.2.0) (2025-12-20)
+
+
+### Features
+
+* add smoke test ([ddcf5fe](https://github.com/bbsakura/xk6-diameter/commit/ddcf5feb5bb9b2652bf5c14a02315fe55d199898))
+
+
+### Bug Fixes
+
+* **deps:** update module go.k6.io/k6 to v1.2.3 ([#72](https://github.com/bbsakura/xk6-diameter/issues/72)) ([e07ded2](https://github.com/bbsakura/xk6-diameter/commit/e07ded20ad2dfb349eb3d0a0edf3a9261a06a504))
+* **deps:** update module go.k6.io/k6 to v1.3.0 ([#81](https://github.com/bbsakura/xk6-diameter/issues/81)) ([20af6b5](https://github.com/bbsakura/xk6-diameter/commit/20af6b524e77882cd1a644a8251a53896a4c2a26))
+* **deps:** update module go.k6.io/k6 to v1.4.2 ([#94](https://github.com/bbsakura/xk6-diameter/issues/94)) ([0de1b12](https://github.com/bbsakura/xk6-diameter/commit/0de1b12e2a89cc7158377af118069d375bb09d5b))
+
 ## [0.1.1](https://github.com/bbsakura/xk6-diameter/compare/v0.1.0...v0.1.1) (2025-08-22)
 
 
