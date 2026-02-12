@@ -1,0 +1,60 @@
+name: go-dep-sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ^1.21
+      - name: go mod tidy and install
+        run: |
+          go mod tidy
+          make install-go-tools
+      - name: go-dep-sync
+        run: make go-dep-sync
+      - name: build
+        run: make build
+      - name: testing
+        run: make test
+      - name: Detect go.mod/go.sum changes
+        id: go_changes
+        run: |
+          if git diff --quiet -- go.mod go.sum; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --short go.mod go.sum
+          fi
+      - name: Create dependency sync PR
+        if: steps.go_changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: sync Go dependencies'
+          branch: chore/go-dep-sync
+          title: 'chore: sync Go dependencies'
+          body: |
+            Automated dependency sync triggered by changes to go.mod or go.sum.
+          add-paths: |
+            go.mod
+            go.sum
+          labels: dependencies
