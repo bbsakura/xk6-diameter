@@ -3,6 +3,12 @@
   "extends": [
     "github>bbsakura/renovate-config"
   ],
+  "packageRules": [
+    {
+      "matchPackageNames": "go.k6.io/xk6/cmd/xk6",
+      "enabled": false
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
