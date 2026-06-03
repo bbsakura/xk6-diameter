@@ -1,17 +1,17 @@
 module github.com/bbsakura/xk6-diameter
 
-go 1.24.4
+go 1.25
 
 require (
 	github.com/fiorix/go-diameter/v4 v4.0.4
-	github.com/grafana/sobek v0.0.0-20260210135005-f23f5510d87e
+	github.com/grafana/sobek v0.0.0-20260603163334-74c003c83a50
 	github.com/pkg/errors v0.9.1
 	go.k6.io/k6 v1.6.0
 )
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
-	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/evanw/esbuild v0.27.2 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
