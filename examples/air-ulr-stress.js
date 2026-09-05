@@ -20,7 +20,7 @@ export default function () {
             addr: "127.0.0.1:3868",
             host: "magma-oai.openair4G.eur",
             realm: "openair4G.eur",
-            network_type: "sctp",
+            network_type: "tcp",
             retries: 0,
             vendor_id: 10415,
             product_name: "xk6-diameter",

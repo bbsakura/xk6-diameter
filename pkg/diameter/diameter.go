@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/pkg/errors"
 	"go.k6.io/k6/js/modules"
+	"go.k6.io/k6/metrics"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -24,18 +25,25 @@ const version = "v0.0.1"
 
 type (
 	// RootModule is the global module instance that will create module
-	// instances for each VU.
+	// instances for each VU. dialPool keys by host (existing WithConnect
+	// semantics); namedPool keys by user-supplied name (EnsureClient);
+	// idPool keys by an auto-generated id (Client / GetClient).
 	RootModule struct {
-		dialPool *sync.Map
-		mu       sync.Mutex
+		dialPool  *sync.Map
+		namedPool *sync.Map
+		idPool    *sync.Map
+		mu        sync.Mutex
+		once      sync.Once
+		tags      *metrics.TagSet
 	}
 
-	// ModuleInstance represents an instance of the GRPC module for every VU.
+	// ModuleInstance represents an instance of the module for every VU.
 	ModuleInstance struct {
-		Version string
-		vu      modules.VU
-		exports map[string]interface{}
-		rm      *RootModule
+		Version  string
+		vu       modules.VU
+		exports  map[string]interface{}
+		rm       *RootModule
+		mLatency *metrics.Metric
 	}
 )
 
@@ -46,21 +54,31 @@ var (
 
 func New() *RootModule {
 	return &RootModule{
-		dialPool: new(sync.Map),
+		dialPool:  new(sync.Map),
+		namedPool: new(sync.Map),
+		idPool:    new(sync.Map),
 	}
 }
 
 // NewModuleInstance implements the modules.Module interface to return
 // a new instance for each VU.
 func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
+	reg := vu.InitEnv().Registry
+	rm.once.Do(func() {
+		rm.tags = reg.RootTagSet().With("module", "diameter")
+	})
 	mi := &ModuleInstance{
-		Version: version,
-		vu:      vu,
-		exports: make(map[string]interface{}),
-		rm:      rm,
+		Version:  version,
+		vu:       vu,
+		exports:  make(map[string]interface{}),
+		rm:       rm,
+		mLatency: reg.MustNewMetric("diameter_tx_duration", metrics.Trend, metrics.Time),
 	}
 	mi.exports["K6DiameterClient"] = mi.NewK6DiameterClient
 	mi.exports["K6DiameterClientWithConnect"] = mi.NewK6DiameterClientWithConnect
+	mi.exports["Client"] = mi.NewClient
+	mi.exports["GetClient"] = mi.GetClient
+	mi.exports["EnsureClient"] = mi.EnsureClient
 	return mi
 }
 
@@ -95,17 +113,40 @@ type ConnectionOptions struct {
 	Additional    []AVP
 }
 
-type K6DiameterClient struct {
-	vu              modules.VU
+// Client is the shared, VU-independent Diameter resource. It owns the
+// connection, peer settings, and response channels. Do not embed a
+// modules.VU here — a single Client can be shared across VUs via the
+// pools on RootModule.
+type Client struct {
 	cfg             *sm.Settings
 	Conn            diam.Conn
 	handlerChannels handlerChannels
+}
+
+// ClientHdr is a per-VU handle that references a shared *Client and
+// carries VU-scoped state (VU handle + metric handles) so that
+// transaction latency can be attributed to the calling VU. It is the
+// type exposed to JS by all constructors below.
+type ClientHdr struct {
+	Client   *Client
+	vu       modules.VU
+	mLatency *metrics.Metric
+	tags     *metrics.TagSet
 }
 
 type handlerChannels struct {
 	checkAIR chan AIAResponce
 	checkULR chan ULAResponce
 	checkCLA chan CLAResponce
+}
+
+func (c *ModuleInstance) newClientHdr(cli *Client) *ClientHdr {
+	return &ClientHdr{
+		Client:   cli,
+		vu:       c.vu,
+		mLatency: c.mLatency,
+		tags:     c.rm.tags,
+	}
 }
 
 func (c *ModuleInstance) NewK6DiameterClientWithConnect(call sobek.ConstructorCall) *sobek.Object {
@@ -118,9 +159,7 @@ func (c *ModuleInstance) NewK6DiameterClientWithConnect(call sobek.ConstructorCa
 	}
 	cli := c.rm.connGetPool(options.Host)
 	if cli == nil {
-		cli = &K6DiameterClient{
-			vu: c.vu,
-		}
+		cli = &Client{}
 		_, err := cli.Connect(options)
 		if err != nil {
 			panic(err)
@@ -128,16 +167,16 @@ func (c *ModuleInstance) NewK6DiameterClientWithConnect(call sobek.ConstructorCa
 		c.rm.connSetPool(options.Host, cli)
 	}
 	rt := c.vu.Runtime()
-	return rt.ToValue(cli).ToObject(rt)
+	return rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
 }
 
-func (c *RootModule) connSetPool(host string, diam *K6DiameterClient) {
+func (c *RootModule) connSetPool(host string, diam *Client) {
 	c.dialPool.Store(host, diam)
 }
 
-func (c *RootModule) connGetPool(host string) *K6DiameterClient {
+func (c *RootModule) connGetPool(host string) *Client {
 	if diam, ok := c.dialPool.Load(host); ok {
-		return diam.(*K6DiameterClient)
+		return diam.(*Client)
 	}
 	return nil
 }
@@ -210,14 +249,65 @@ func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
 }
 
 func (c *ModuleInstance) NewK6DiameterClient(call sobek.ConstructorCall) *sobek.Object {
-	rt := c.vu.Runtime()
-	cli := &K6DiameterClient{
-		vu: c.vu,
-	}
-	return rt.ToValue(cli).ToObject(rt)
+	return c.NewClient(call)
 }
 
-func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
+// NewClient is the short-named alias of NewK6DiameterClient. It creates
+// a fresh, unconnected *Client and registers it in the id pool so it can
+// be retrieved later via GetClient.
+func (c *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
+	rt := c.vu.Runtime()
+	cli := &Client{}
+	id := newClientID()
+	c.rm.idPool.Store(id, cli)
+	hdr := c.newClientHdr(cli)
+	obj := rt.ToValue(hdr).ToObject(rt)
+	_ = obj.Set("id", id)
+	return obj
+}
+
+// GetClient looks up a previously created *Client by the id returned
+// from a prior Client(...) constructor call and wraps it in a per-VU
+// ClientHdr.
+func (c *ModuleInstance) GetClient(id string) *sobek.Object {
+	rt := c.vu.Runtime()
+	v, ok := c.rm.idPool.Load(id)
+	if !ok {
+		panic(errors.Errorf("client with id %q not found", id))
+	}
+	hdr := c.newClientHdr(v.(*Client))
+	obj := rt.ToValue(hdr).ToObject(rt)
+	_ = obj.Set("id", id)
+	return obj
+}
+
+// EnsureClient returns a ClientHdr wrapping a *Client from the named
+// pool. If no entry exists for name, it connects a new *Client using
+// params and registers it. params has the same shape as ConnectionOptions.
+func (c *ModuleInstance) EnsureClient(name string, params map[string]interface{}) *sobek.Object {
+	c.rm.mu.Lock()
+	defer c.rm.mu.Unlock()
+	rt := c.vu.Runtime()
+	if v, ok := c.rm.namedPool.Load(name); ok {
+		return rt.ToValue(c.newClientHdr(v.(*Client))).ToObject(rt)
+	}
+	options, err := MapToConnectionOptions(params)
+	if err != nil {
+		panic(err)
+	}
+	cli := &Client{}
+	if _, err := cli.Connect(options); err != nil {
+		panic(err)
+	}
+	c.rm.namedPool.Store(name, cli)
+	return rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
+}
+
+func newClientID() string {
+	return strconv.FormatUint(uint64(rand.Uint32()), 16) + strconv.FormatInt(time.Now().UnixNano(), 16)
+}
+
+func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 	if len(options.Addr) == 0 {
 		return false, errors.New("missing addr")
 	}
@@ -281,18 +371,18 @@ func (c *K6DiameterClient) Connect(options ConnectionOptions) (bool, error) {
 	return true, nil
 }
 
-func (c *K6DiameterClient) Close() {
+func (c *Client) Close() {
 	if c.Conn == nil {
 		return
 	}
 	c.Conn.Close()
 }
 
-func (c *K6DiameterClient) generateSessionID() string {
+func (c *Client) generateSessionID() string {
 	return "session;" + strconv.Itoa(int(rand.Uint32()))
 }
 
-func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
+func (c *Client) SendAIR(options ConnectionOptions) (bool, error) {
 	var err error
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
@@ -336,7 +426,7 @@ func (c *K6DiameterClient) SendAIR(options ConnectionOptions) (bool, error) {
 	return true, nil
 }
 
-func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (int64, error) {
+func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
 	if _, err := c.SendAIR(options); err != nil {
 		return 0, err
 	}
@@ -351,7 +441,7 @@ func (c *K6DiameterClient) CheckSendAIR(options ConnectionOptions) (int64, error
 	}
 }
 
-func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
+func (c *Client) SendULR(options ConnectionOptions) (bool, error) {
 	var err error
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
@@ -394,7 +484,7 @@ func (c *K6DiameterClient) SendULR(options ConnectionOptions) (bool, error) {
 	return true, nil
 }
 
-func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (int64, error) {
+func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 	if _, err := c.SendULR(options); err != nil {
 		return 0, err
 	}
@@ -409,7 +499,7 @@ func (c *K6DiameterClient) CheckSendULR(options ConnectionOptions) (int64, error
 	}
 }
 
-func (c *K6DiameterClient) CheckCLA(wait int64) (int64, error) {
+func (c *Client) CheckCLA(wait int64) (int64, error) {
 	select {
 	case res := <-c.handlerChannels.checkCLA:
 		if res.Error != nil {
@@ -419,6 +509,58 @@ func (c *K6DiameterClient) CheckCLA(wait int64) (int64, error) {
 	case <-time.After(time.Duration(wait) * time.Second):
 		return 0, errors.New("Cancel Location timeout")
 	}
+}
+
+// ClientHdr delegates: keep the JS-visible method set identical to the
+// pre-refactor Client. Only CheckSend* wrap latency measurement — the
+// underlying message send/receive path on *Client is unchanged.
+
+func (h *ClientHdr) Connect(options ConnectionOptions) (bool, error) {
+	return h.Client.Connect(options)
+}
+
+func (h *ClientHdr) Close() { h.Client.Close() }
+
+func (h *ClientHdr) SendAIR(options ConnectionOptions) (bool, error) {
+	return h.Client.SendAIR(options)
+}
+
+func (h *ClientHdr) SendULR(options ConnectionOptions) (bool, error) {
+	return h.Client.SendULR(options)
+}
+
+func (h *ClientHdr) CheckSendAIR(options ConnectionOptions) (int64, error) {
+	startAt := time.Now()
+	code, err := h.Client.CheckSendAIR(options)
+	h.pushLatency("AIR", startAt, err)
+	return code, err
+}
+
+func (h *ClientHdr) CheckSendULR(options ConnectionOptions) (int64, error) {
+	startAt := time.Now()
+	code, err := h.Client.CheckSendULR(options)
+	h.pushLatency("ULR", startAt, err)
+	return code, err
+}
+
+func (h *ClientHdr) CheckCLA(wait int64) (int64, error) {
+	return h.Client.CheckCLA(wait)
+}
+
+func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
+	state := h.vu.State()
+	if state == nil {
+		return
+	}
+	tags := h.tags.With("command", cmd)
+	if err != nil {
+		tags = tags.With("error", "true")
+	}
+	metrics.PushIfNotDone(h.vu.Context(), state.Samples, metrics.Sample{
+		TimeSeries: metrics.TimeSeries{Metric: h.mLatency, Tags: tags},
+		Time:       time.Now(),
+		Value:      metrics.D(time.Since(startAt)),
+	})
 }
 
 // S6a/S6d-Indicator | Initial-AttachIndicator
