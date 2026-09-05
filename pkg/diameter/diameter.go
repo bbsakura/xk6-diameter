@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/pkg/errors"
 	"go.k6.io/k6/js/modules"
+	"go.k6.io/k6/js/promises"
 	"go.k6.io/k6/metrics"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -25,13 +26,11 @@ const version = "v0.0.1"
 
 type (
 	// RootModule is the global module instance that will create module
-	// instances for each VU. dialPool keys by host (existing WithConnect
-	// semantics); namedPool keys by user-supplied name (EnsureClient);
-	// idPool keys by an auto-generated id (Client / GetClient).
+	// instances for each VU. dialPool keys by host (WithConnect); namedPool
+	// keys by user-supplied name (EnsureClient).
 	RootModule struct {
 		dialPool  *sync.Map
 		namedPool *sync.Map
-		idPool    *sync.Map
 		mu        sync.Mutex
 		once      sync.Once
 		tags      *metrics.TagSet
@@ -56,7 +55,6 @@ func New() *RootModule {
 	return &RootModule{
 		dialPool:  new(sync.Map),
 		namedPool: new(sync.Map),
-		idPool:    new(sync.Map),
 	}
 }
 
@@ -77,7 +75,6 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	mi.exports["K6DiameterClient"] = mi.NewK6DiameterClient
 	mi.exports["K6DiameterClientWithConnect"] = mi.NewK6DiameterClientWithConnect
 	mi.exports["Client"] = mi.NewClient
-	mi.exports["GetClient"] = mi.GetClient
 	mi.exports["EnsureClient"] = mi.EnsureClient
 	return mi
 }
@@ -111,16 +108,47 @@ type ConnectionOptions struct {
 
 	ProxiableFlag bool
 	Additional    []AVP
+
+	// Dict overrides dict.Default for both sm.Client and outgoing
+	// Requests. Nil falls back to dict.Default (existing behavior).
+	Dict *dict.Parser
+}
+
+// Request describes an arbitrary Diameter command. Use this with
+// Client.SendRequest / CheckSendRequest / ClientHdr.SendRequest to
+// send messages beyond the built-in AIR/ULR wrappers. AVPs are added
+// to the message in order; unlike the AIR/ULR path, no Session-Id /
+// Origin-Host / Origin-Realm / Destination-* AVPs are auto-injected —
+// the caller is responsible for supplying the full AVP set.
+type Request struct {
+	AppID           uint32
+	Cmd             uint32
+	Flags           uint8 // OR'd into m.Header.CommandFlags after RequestFlag
+	AVPs            []AVP
+	CompletionSleep uint // seconds; 0 = no wait budget → immediate timeout
 }
 
 // Client is the shared, VU-independent Diameter resource. It owns the
-// connection, peer settings, and response channels. Do not embed a
+// connection, peer settings, and the correlation table used to route
+// client-initiated Answers back to their Requests. Do not embed a
 // modules.VU here — a single Client can be shared across VUs via the
 // pools on RootModule.
 type Client struct {
-	cfg             *sm.Settings
-	Conn            diam.Conn
-	handlerChannels handlerChannels
+	cfg   *sm.Settings
+	Conn  diam.Conn
+	dict  *dict.Parser
+	corr  *correlationTbl
+	claCh chan CLAResponce
+}
+
+// Dict returns the dictionary attached to this Client. Callers building
+// Diameter messages directly (e.g. via diam.NewRequest) can pass this
+// so the message shares the peer's AVP name resolution.
+func (c *Client) Dict() *dict.Parser {
+	if c.dict != nil {
+		return c.dict
+	}
+	return dict.Default
 }
 
 // ClientHdr is a per-VU handle that references a shared *Client and
@@ -134,10 +162,47 @@ type ClientHdr struct {
 	tags     *metrics.TagSet
 }
 
-type handlerChannels struct {
-	checkAIR chan AIAResponce
-	checkULR chan ULAResponce
-	checkCLA chan CLAResponce
+// correlationTbl routes client-initiated Answers to the goroutine
+// waiting for them, keyed by Hop-by-Hop Identifier (RFC 6733 §3).
+type correlationTbl struct {
+	mu      sync.Mutex
+	pending map[uint32]chan *diam.Message
+}
+
+func newCorrelationTbl() *correlationTbl {
+	return &correlationTbl{pending: make(map[uint32]chan *diam.Message)}
+}
+
+func (t *correlationTbl) register(hbhID uint32) chan *diam.Message {
+	ch := make(chan *diam.Message, 1)
+	t.mu.Lock()
+	t.pending[hbhID] = ch
+	t.mu.Unlock()
+	return ch
+}
+
+func (t *correlationTbl) unregister(hbhID uint32) {
+	t.mu.Lock()
+	delete(t.pending, hbhID)
+	t.mu.Unlock()
+}
+
+// deliver hands m to the pending channel for its HBH-ID. Non-blocking:
+// a duplicate Answer or one arriving after Unregister is silently
+// dropped so the mux reader goroutine cannot stall on a full channel.
+func (t *correlationTbl) deliver(m *diam.Message) bool {
+	t.mu.Lock()
+	ch, ok := t.pending[m.Header.HopByHopID]
+	t.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- m:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *ModuleInstance) newClientHdr(cli *Client) *ClientHdr {
@@ -252,33 +317,12 @@ func (c *ModuleInstance) NewK6DiameterClient(call sobek.ConstructorCall) *sobek.
 	return c.NewClient(call)
 }
 
-// NewClient is the short-named alias of NewK6DiameterClient. It creates
-// a fresh, unconnected *Client and registers it in the id pool so it can
-// be retrieved later via GetClient.
-func (c *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
+// NewClient returns a fresh, unconnected ClientHdr. The underlying
+// *Client is not registered in any pool — its lifetime is tied to the
+// JS reference. Use EnsureClient for cross-VU shared instances.
+func (c *ModuleInstance) NewClient(_ sobek.ConstructorCall) *sobek.Object {
 	rt := c.vu.Runtime()
-	cli := &Client{}
-	id := newClientID()
-	c.rm.idPool.Store(id, cli)
-	hdr := c.newClientHdr(cli)
-	obj := rt.ToValue(hdr).ToObject(rt)
-	_ = obj.Set("id", id)
-	return obj
-}
-
-// GetClient looks up a previously created *Client by the id returned
-// from a prior Client(...) constructor call and wraps it in a per-VU
-// ClientHdr.
-func (c *ModuleInstance) GetClient(id string) *sobek.Object {
-	rt := c.vu.Runtime()
-	v, ok := c.rm.idPool.Load(id)
-	if !ok {
-		panic(errors.Errorf("client with id %q not found", id))
-	}
-	hdr := c.newClientHdr(v.(*Client))
-	obj := rt.ToValue(hdr).ToObject(rt)
-	_ = obj.Set("id", id)
-	return obj
+	return rt.ToValue(c.newClientHdr(&Client{})).ToObject(rt)
 }
 
 // EnsureClient returns a ClientHdr wrapping a *Client from the named
@@ -303,10 +347,6 @@ func (c *ModuleInstance) EnsureClient(name string, params map[string]interface{}
 	return rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
 }
 
-func newClientID() string {
-	return strconv.FormatUint(uint64(rand.Uint32()), 16) + strconv.FormatInt(time.Now().UnixNano(), 16)
-}
-
 func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 	if len(options.Addr) == 0 {
 		return false, errors.New("missing addr")
@@ -326,8 +366,10 @@ func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 	}
 	mux := sm.New(cfg)
 
+	c.dict = options.Dict // nil is fine; Dict() falls back to dict.Default
+
 	cli := &sm.Client{
-		Dict:             dict.Default,
+		Dict:             c.Dict(),
 		Handler:          mux,
 		MaxRetransmits:   options.Retries,
 		EnableWatchdog:   false,
@@ -349,22 +391,19 @@ func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 	if err != nil {
 		return false, errors.WithMessage(err, "Dial error")
 	}
-	// set MessageHandler
-	c.handlerChannels.checkAIR = make(chan AIAResponce, 1000)
+	// Set MessageHandler. Any client-initiated Answer (AIR/ULR and any
+	// arbitrary Cmd sent via SendRequest) is routed by HBH-ID through
+	// the CorrelationTbl via the catch-all handler. CLR is server-
+	// initiated and gets a specific handler that feeds a fan-in channel.
+	c.corr = newCorrelationTbl()
+	c.claCh = make(chan CLAResponce, 1000)
+
 	mux.HandleIdx(
-		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: false},
-		handleAuthenticationInformationAnswer(c.handlerChannels.checkAIR))
-
-	c.handlerChannels.checkULR = make(chan ULAResponce, 1000)
-	mux.HandleIdx(
-		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: false},
-		handleUpdateLocationAnswer(c.handlerChannels.checkULR))
-
-	c.handlerChannels.checkCLA = make(chan CLAResponce, 1000)
-
-	mux.HandleIdx(diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true}, handleCancelLocationAnswer(c.handlerChannels.checkCLA))
-	// Catch All
-	mux.HandleIdx(diam.ALL_CMD_INDEX, handleAll())
+		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true},
+		handleCancelLocationAnswer(c.claCh))
+	mux.HandleIdx(diam.ALL_CMD_INDEX, diam.HandlerFunc(func(_ diam.Conn, m *diam.Message) {
+		c.corr.deliver(m)
+	}))
 
 	c.Conn = conn
 	c.cfg = cfg
@@ -382,126 +421,169 @@ func (c *Client) generateSessionID() string {
 	return "session;" + strconv.Itoa(int(rand.Uint32()))
 }
 
-func (c *Client) SendAIR(options ConnectionOptions) (bool, error) {
-	var err error
+// buildRequest constructs a Diameter request with the standard S6a
+// Session-Id / Origin-Host / Origin-Realm AVPs plus the caller-supplied
+// Additional AVPs. The returned message has its HopByHopID assigned by
+// diam.NewRequest and is used by both Send* (fire-and-forget) and
+// CheckSend* (pending registration keyed by HopByHopID).
+func (c *Client) buildRequest(cmd uint32, options ConnectionOptions) (*diam.Message, error) {
 	meta, ok := smpeer.FromContext(c.Conn.Context())
 	if !ok {
-		return false, errors.New("peer metadata unavailable")
+		return nil, errors.New("peer metadata unavailable")
 	}
-
-	var sid string
-	if options.SessionID != "" {
-		sid = options.SessionID
-	} else {
+	sid := options.SessionID
+	if sid == "" {
 		sid = c.generateSessionID()
 	}
-	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
-	avps := []AVPMeta{
+	m := diam.NewRequest(cmd, diam.TGPP_S6A_APP_ID, c.Dict())
+	for _, a := range []AVPMeta{
 		{code: avp.SessionID, flag: avp.Mbit, vendor: 0, value: datatype.UTF8String(sid)},
 		{code: avp.OriginHost, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginHost},
 		{code: avp.OriginRealm, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginRealm},
-	}
-	for _, avp := range avps {
-		_, err = m.NewAVP(avp.code, avp.flag, avp.vendor, avp.value)
-		if err != nil {
-			return false, errors.WithMessage(err, "NewAVP failed")
+	} {
+		if _, err := m.NewAVP(a.code, a.flag, a.vendor, a.value); err != nil {
+			return nil, errors.WithMessage(err, "NewAVP failed")
 		}
 	}
 	if options.ProxiableFlag {
 		m.Header.CommandFlags |= diam.ProxiableFlag
 	}
-	err = modifyMessage(m, meta, options)
-	if err != nil {
+	if err := modifyMessage(m, meta, options); err != nil {
 		log.Println(err)
 	}
-	err = appendAVPs(m, meta, options.Additional)
-	if err != nil {
+	if err := appendAVPs(m, meta, options.Additional); err != nil {
 		log.Println(err)
 	}
+	return m, nil
+}
 
+// buildGeneric constructs a Diameter Request from a Request struct with
+// no auto-injected AVPs. The caller supplies the complete AVP list.
+func (c *Client) buildGeneric(req Request) (*diam.Message, error) {
+	meta, ok := smpeer.FromContext(c.Conn.Context())
+	if !ok {
+		return nil, errors.New("peer metadata unavailable")
+	}
+	m := diam.NewRequest(req.Cmd, req.AppID, c.Dict())
+	m.Header.CommandFlags |= req.Flags
+	if err := appendAVPs(m, meta, req.AVPs); err != nil {
+		return nil, errors.WithMessage(err, "appendAVPs failed")
+	}
+	return m, nil
+}
+
+// SendRequest writes an arbitrary Diameter Request to the wire without
+// waiting for its Answer. The Answer, if any, is silently dropped by
+// the correlation catch-all handler. Use CheckSendRequest or
+// ClientHdr.SendRequest to receive the Answer.
+func (c *Client) SendRequest(req Request) (bool, error) {
+	m, err := c.buildGeneric(req)
+	if err != nil {
+		return false, err
+	}
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return false, errors.WithMessage(err, "write message fail")
 	}
+	return true, nil
+}
 
+// CheckSendRequest writes an arbitrary Diameter Request and waits for
+// the peer's Answer, correlated by Hop-by-Hop id, up to
+// req.CompletionSleep seconds. Returns the raw Answer message so the
+// caller can Unmarshal into any struct that matches the peer's dict.
+func (c *Client) CheckSendRequest(req Request) (*diam.Message, error) {
+	m, err := c.buildGeneric(req)
+	if err != nil {
+		return nil, err
+	}
+	hbhID := m.Header.HopByHopID
+	ch := c.corr.register(hbhID)
+	defer c.corr.unregister(hbhID)
+
+	if _, err := m.WriteTo(c.Conn); err != nil {
+		return nil, errors.WithMessage(err, "write message fail")
+	}
+	select {
+	case resp := <-ch:
+		return resp, nil
+	case <-time.After(time.Duration(req.CompletionSleep) * time.Second):
+		return nil, errors.Errorf("request timeout (appID=%d cmd=%d)", req.AppID, req.Cmd)
+	}
+}
+
+func (c *Client) SendAIR(options ConnectionOptions) (bool, error) {
+	m, err := c.buildRequest(diam.AuthenticationInformation, options)
+	if err != nil {
+		return false, err
+	}
+	if _, err := m.WriteTo(c.Conn); err != nil {
+		return false, errors.WithMessage(err, "write message fail")
+	}
 	return true, nil
 }
 
 func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
-	if _, err := c.SendAIR(options); err != nil {
+	m, err := c.buildRequest(diam.AuthenticationInformation, options)
+	if err != nil {
 		return 0, err
 	}
+	hbhID := m.Header.HopByHopID
+	ch := c.corr.register(hbhID)
+	defer c.corr.unregister(hbhID)
+
+	if _, err := m.WriteTo(c.Conn); err != nil {
+		return 0, errors.WithMessage(err, "write message fail")
+	}
 	select {
-	case res := <-c.handlerChannels.checkAIR:
-		if res.Error != nil {
-			return 0, res.Error
+	case resp := <-ch:
+		var aia AIA
+		if err := resp.Unmarshal(&aia); err != nil {
+			return 0, errors.WithMessage(err, "AIA Unmarshal failed")
 		}
-		return int64(res.AIA.ResultCode), nil
+		return int64(aia.ResultCode), nil
 	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
 		return 0, errors.New("Authentication Information timeout")
 	}
 }
 
 func (c *Client) SendULR(options ConnectionOptions) (bool, error) {
-	var err error
-	meta, ok := smpeer.FromContext(c.Conn.Context())
-	if !ok {
-		return false, errors.New("peer metadata unavailable")
-	}
-	var sid string
-	if options.SessionID != "" {
-		sid = options.SessionID
-	} else {
-		sid = c.generateSessionID()
-	}
-	m := diam.NewRequest(diam.UpdateLocation, diam.TGPP_S6A_APP_ID, dict.Default)
-	avps := []AVPMeta{
-		{code: avp.SessionID, flag: avp.Mbit, vendor: 0, value: datatype.UTF8String(sid)},
-		{code: avp.OriginHost, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginHost},
-		{code: avp.OriginRealm, flag: avp.Mbit, vendor: 0, value: c.cfg.OriginRealm},
-	}
-	for _, avp := range avps {
-		_, err = m.NewAVP(avp.code, avp.flag, avp.vendor, avp.value)
-		if err != nil {
-			return false, errors.WithMessage(err, "NewAVP failed")
-		}
-	}
-	if options.ProxiableFlag {
-		m.Header.CommandFlags |= diam.ProxiableFlag
-	}
-	err = modifyMessage(m, meta, options)
+	m, err := c.buildRequest(diam.UpdateLocation, options)
 	if err != nil {
-		log.Println(err)
+		return false, err
 	}
-	err = appendAVPs(m, meta, options.Additional)
-	if err != nil {
-		log.Println(err)
-	}
-
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return false, errors.WithMessage(err, "write message fail")
 	}
-
 	return true, nil
 }
 
 func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
-	if _, err := c.SendULR(options); err != nil {
+	m, err := c.buildRequest(diam.UpdateLocation, options)
+	if err != nil {
 		return 0, err
 	}
+	hbhID := m.Header.HopByHopID
+	ch := c.corr.register(hbhID)
+	defer c.corr.unregister(hbhID)
+
+	if _, err := m.WriteTo(c.Conn); err != nil {
+		return 0, errors.WithMessage(err, "write message fail")
+	}
 	select {
-	case res := <-c.handlerChannels.checkULR:
-		if res.Error != nil {
-			return 0, res.Error
+	case resp := <-ch:
+		var ula ULA
+		if err := resp.Unmarshal(&ula); err != nil {
+			return 0, errors.WithMessage(err, "ULA Unmarshal failed")
 		}
-		return int64(res.ULA.ResultCode), nil
+		return int64(ula.ResultCode), nil
 	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
-		return 0, errors.New("Authentication Information timeout")
+		return 0, errors.New("Update Location timeout")
 	}
 }
 
 func (c *Client) CheckCLA(wait int64) (int64, error) {
 	select {
-	case res := <-c.handlerChannels.checkCLA:
+	case res := <-c.claCh:
 		if res.Error != nil {
 			return 0, res.Error
 		}
@@ -521,12 +603,106 @@ func (h *ClientHdr) Connect(options ConnectionOptions) (bool, error) {
 
 func (h *ClientHdr) Close() { h.Client.Close() }
 
-func (h *ClientHdr) SendAIR(options ConnectionOptions) (bool, error) {
-	return h.Client.SendAIR(options)
+// SendAIR returns a JS Promise that resolves with the decoded AIA
+// struct when the peer replies (correlated by Hop-by-Hop id), or
+// rejects on send failure / CompletionSleep timeout / unmarshal error.
+// Transaction latency is emitted on both resolve and reject.
+func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
+	return h.sendPromise(
+		"AIR",
+		time.Duration(options.CompletionSleep)*time.Second,
+		func() (*diam.Message, error) {
+			return h.Client.buildRequest(diam.AuthenticationInformation, options)
+		},
+		func(m *diam.Message) (any, error) {
+			var aia AIA
+			if err := m.Unmarshal(&aia); err != nil {
+				return nil, errors.WithMessage(err, "AIA Unmarshal failed")
+			}
+			return aia, nil
+		})
 }
 
-func (h *ClientHdr) SendULR(options ConnectionOptions) (bool, error) {
-	return h.Client.SendULR(options)
+func (h *ClientHdr) SendULR(options ConnectionOptions) *sobek.Promise {
+	return h.sendPromise(
+		"ULR",
+		time.Duration(options.CompletionSleep)*time.Second,
+		func() (*diam.Message, error) {
+			return h.Client.buildRequest(diam.UpdateLocation, options)
+		},
+		func(m *diam.Message) (any, error) {
+			var ula ULA
+			if err := m.Unmarshal(&ula); err != nil {
+				return nil, errors.WithMessage(err, "ULA Unmarshal failed")
+			}
+			return ula, nil
+		})
+}
+
+// SendRequest resolves with the raw *diam.Message Answer so callers
+// can Unmarshal into any struct that matches the peer's dictionary.
+func (h *ClientHdr) SendRequest(req Request) *sobek.Promise {
+	cmdLabel := "cmd_" + strconv.FormatUint(uint64(req.Cmd), 10)
+	if dcmd, err := h.Client.Dict().FindCommand(req.AppID, req.Cmd); err == nil {
+		cmdLabel = dcmd.Short
+	}
+	return h.sendPromise(
+		cmdLabel,
+		time.Duration(req.CompletionSleep)*time.Second,
+		func() (*diam.Message, error) { return h.Client.buildGeneric(req) },
+		func(m *diam.Message) (any, error) { return m, nil },
+	)
+}
+
+// sendPromise runs the standard "build → register → write → wait"
+// sequence in a background goroutine and returns a Promise for JS.
+// build is expected to produce a Request whose HopByHopID is used as
+// the correlation key; unmarshal converts the Answer message into the
+// value handed to resolve().
+func (h *ClientHdr) sendPromise(
+	cmdLabel string,
+	timeout time.Duration,
+	build func() (*diam.Message, error),
+	unmarshal func(*diam.Message) (any, error),
+) *sobek.Promise {
+	startAt := time.Now()
+	p, resolve, reject := promises.New(h.vu)
+
+	m, err := build()
+	if err != nil {
+		h.pushLatency(cmdLabel, startAt, err)
+		reject(err)
+		return p
+	}
+	hbhID := m.Header.HopByHopID
+	ch := h.Client.corr.register(hbhID)
+
+	if _, err := m.WriteTo(h.Client.Conn); err != nil {
+		h.Client.corr.unregister(hbhID)
+		wrapped := errors.WithMessage(err, "write message fail")
+		h.pushLatency(cmdLabel, startAt, wrapped)
+		reject(wrapped)
+		return p
+	}
+
+	go func() {
+		defer h.Client.corr.unregister(hbhID)
+		select {
+		case resp := <-ch:
+			v, err := unmarshal(resp)
+			h.pushLatency(cmdLabel, startAt, err)
+			if err != nil {
+				reject(err)
+				return
+			}
+			resolve(v)
+		case <-time.After(timeout):
+			err := errors.New(cmdLabel + " timeout")
+			h.pushLatency(cmdLabel, startAt, err)
+			reject(err)
+		}
+	}()
+	return p
 }
 
 func (h *ClientHdr) CheckSendAIR(options ConnectionOptions) (int64, error) {
@@ -556,10 +732,11 @@ func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
 	if err != nil {
 		tags = tags.With("error", "true")
 	}
+	now := time.Now()
 	metrics.PushIfNotDone(h.vu.Context(), state.Samples, metrics.Sample{
 		TimeSeries: metrics.TimeSeries{Metric: h.mLatency, Tags: tags},
-		Time:       time.Now(),
-		Value:      metrics.D(time.Since(startAt)),
+		Time:       now,
+		Value:      metrics.D(now.Sub(startAt)),
 	})
 }
 
@@ -664,30 +841,6 @@ type CLAResponce struct {
 	Error error
 }
 
-func handleAuthenticationInformationAnswer(done chan AIAResponce) diam.HandlerFunc {
-	return func(c diam.Conn, m *diam.Message) {
-		var aia AIA
-		err := m.Unmarshal(&aia)
-		if err != nil {
-			done <- AIAResponce{Error: errors.WithMessage(err, "AIA Unmarshal failed")}
-			return
-		}
-		done <- AIAResponce{AIA: aia, Error: nil}
-	}
-}
-
-func handleUpdateLocationAnswer(done chan ULAResponce) diam.HandlerFunc {
-	return func(c diam.Conn, m *diam.Message) {
-		var ula ULA
-		err := m.Unmarshal(&ula)
-		if err != nil {
-			done <- ULAResponce{Error: errors.WithMessage(err, "ULA Unmarshal failed")}
-			return
-		}
-		done <- ULAResponce{ULA: ula, Error: nil}
-	}
-}
-
 func handleCancelLocationAnswer(done chan CLAResponce) diam.HandlerFunc {
 	return func(c diam.Conn, m *diam.Message) {
 		var cla CLA
@@ -697,11 +850,5 @@ func handleCancelLocationAnswer(done chan CLAResponce) diam.HandlerFunc {
 			return
 		}
 		done <- CLAResponce{CLA: cla, Error: nil}
-	}
-}
-
-func handleAll() diam.HandlerFunc {
-	return func(c diam.Conn, m *diam.Message) {
-		log.Printf("Received Meesage From %s\n%s\n", c.RemoteAddr(), m)
 	}
 }
