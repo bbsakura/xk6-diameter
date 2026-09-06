@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/dict"
 )
 
 // Matcher filters incoming Diameter messages. Nil header pointers and
@@ -71,15 +72,29 @@ func avpFilterMatch(msg *diam.Message, f AVP) bool {
 
 // MapToMatcher parses a JS-supplied options object into a Matcher.
 // Keys: app_id, cmd_code, is_request, avps.
+//
+// cmd_code accepts either a number (raw code) or a string (command
+// Name like "Authentication-Information" or Short like "AIR"),
+// resolved against dict.Default. An unknown string resolves to a
+// sentinel that matches no real command, mirroring the behavior of
+// unknown AVP keys in avp filters.
 func MapToMatcher(m map[string]interface{}) Matcher {
 	var out Matcher
 	if v, ok := m["app_id"].(int64); ok {
 		u := uint32(v)
 		out.AppID = &u
 	}
-	if v, ok := m["cmd_code"].(int64); ok {
+	switch v := m["cmd_code"].(type) {
+	case int64:
 		u := uint32(v)
 		out.CmdCode = &u
+	case string:
+		if code, ok := resolveCmdName(v); ok {
+			out.CmdCode = &code
+		} else {
+			never := ^uint32(0)
+			out.CmdCode = &never
+		}
 	}
 	if v, ok := m["is_request"].(bool); ok {
 		out.IsRequest = &v
@@ -95,4 +110,33 @@ func MapToMatcher(m map[string]interface{}) Matcher {
 		}
 	}
 	return out
+}
+
+// resolveCmdName looks up a command by Name or Short across every App
+// registered in dict.Default and returns its code. To support the
+// common "AIR" / "AIA" / "ULR" / "ULA" parlance where the trailing
+// letter denotes Request/Answer, unknown names ending in R or A are
+// retried against the base short (e.g. "AIR" → "AI"); is_request then
+// distinguishes the direction.
+func resolveCmdName(name string) (uint32, bool) {
+	for _, app := range dict.Default.Apps() {
+		for _, cmd := range app.Command {
+			if cmd.Name == name || cmd.Short == name {
+				return cmd.Code, true
+			}
+		}
+	}
+	if len(name) > 1 {
+		if last := name[len(name)-1]; last == 'R' || last == 'A' {
+			base := name[:len(name)-1]
+			for _, app := range dict.Default.Apps() {
+				for _, cmd := range app.Command {
+					if cmd.Short == base {
+						return cmd.Code, true
+					}
+				}
+			}
+		}
+	}
+	return 0, false
 }

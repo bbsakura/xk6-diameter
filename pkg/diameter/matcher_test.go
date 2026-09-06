@@ -171,3 +171,29 @@ func TestMapToMatcher_Empty(t *testing.T) {
 		t.Fatalf("expected all-wildcard matcher, got %+v", m)
 	}
 }
+
+func TestMapToMatcher_CmdCode_StringLongName(t *testing.T) {
+	m := MapToMatcher(map[string]interface{}{"cmd_code": "Authentication-Information"})
+	if m.CmdCode == nil || *m.CmdCode != diam.AuthenticationInformation {
+		t.Fatalf("long name should resolve to AIR code; got %v", m.CmdCode)
+	}
+}
+
+func TestMapToMatcher_CmdCode_StringShort(t *testing.T) {
+	m := MapToMatcher(map[string]interface{}{"cmd_code": "AIR"})
+	if m.CmdCode == nil || *m.CmdCode != diam.AuthenticationInformation {
+		t.Fatalf("short name should resolve to AIR code; got %v", m.CmdCode)
+	}
+}
+
+func TestMapToMatcher_CmdCode_UnknownString_MatchesNothing(t *testing.T) {
+	m := MapToMatcher(map[string]interface{}{"cmd_code": "No-Such-Cmd"})
+	// Unknown name → sentinel; matcher never matches a real msg.
+	if m.CmdCode == nil {
+		t.Fatalf("expected sentinel CmdCode, got nil")
+	}
+	msg := buildTestRequest(t)
+	if m.match(msg) {
+		t.Fatalf("matcher with unknown cmd name should not match anything")
+	}
+}

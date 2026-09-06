@@ -14,12 +14,22 @@
 
 ```ts
 type Matcher = {
-  app_id?: number;           // Diameter Application-Id
-  cmd_code?: number;         // Command Code
-  is_request?: boolean;      // R-flag。true=Request, false=Answer
+  app_id?: number;                   // Diameter Application-Id
+  cmd_code?: number | string;        // Command Code (数値) or 名前 ("AIR" / "Authentication-Information" 等)
+  is_request?: boolean;              // R-flag。true=Request, false=Answer
   avps?: Array<{ key: string; value: any }>;
 };
 ```
+
+### `cmd_code` の文字列指定
+
+`dict.Default` を引いて名前を code に解決する:
+
+- **long name** — 例 `"Authentication-Information"` / `"Cancel-Location"` (dict の `name` 属性)
+- **short name** — 例 `"AI"` / `"CL"` (dict の `short` 属性)
+- **short + R/A サフィックス** — 例 `"AIR"` / `"AIA"` / `"CLR"` / `"CLA"` 。 末尾の `R`/`A` が strip され short と照合される。 Request/Answer の区別は `is_request` で行う (`AIR` と `AIA` は同一 code)。
+
+未知の名前を渡すと matcher は何にも match しない (未知 AVP key と同じ挙動)。カスタム application dict を使う場合は `dict.LoadFile` などで dict.Default に事前ロードするか、数値 code を直接指定する。
 
 - 各フィールドは省略時 wildcard。全省略の `{}` はすべてのメッセージにマッチ。
 - 複数指定は **AND**。`avps` の各要素も全て一致する必要がある。
@@ -29,13 +39,14 @@ type Matcher = {
 
 例:
 ```js
-// CLR (Cancel Location Request)
-{ cmd_code: 316, is_request: true }
+// CLR (Cancel Location Request) — 文字列でも数値でも
+{ cmd_code: "CLR" }                                 // "CL" short + "R" サフィックスで解決
+{ cmd_code: "Cancel-Location", is_request: true }   // long name
+{ cmd_code: 317, is_request: true }                 // 数値 code 直指定
 
 // 特定 Session + User の CLR
 {
-  cmd_code: 316,
-  is_request: true,
+  cmd_code: "CLR",
   avps: [
     { key: "Session-Id", value: "sess;42" },
     { key: "User-Name",  value: "001010000000001" },
@@ -56,7 +67,7 @@ import diameter from "k6/x/diameter";
 const conn = diameter.EnsureConn("hss", { /* connect opts */ });
 
 export default async function () {
-  const req = await conn.receive({ cmd_code: 316, is_request: true });
+  const req = await conn.receive({ cmd_code: "CLR", is_request: true });
   console.log("got CLR from", req.Header.OriginHost);
   // Answer を返したい場合は自前で組み立てて conn.sendRequest(...) する
 }
@@ -146,7 +157,7 @@ const conn = diameter.EnsureConn("hss", {
 
 // VU 起動時に一度だけ CLR ハンドラを登録 (共有 conn なので 1 つで十分)
 const clrHandle = conn.serve(
-  { cmd_code: 316, is_request: true },
+  { cmd_code: "CLR", is_request: true },
   (clr) => console.log("CLR:", clr.Header.HopByHopID),
 );
 
