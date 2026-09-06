@@ -617,7 +617,8 @@ func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
 				return nil, errors.WithMessage(err, "AIA Unmarshal failed")
 			}
 			return aia, nil
-		})
+		},
+	)
 }
 
 func (h *ClientHdr) SendULR(options ConnectionOptions) *sobek.Promise {
@@ -633,7 +634,8 @@ func (h *ClientHdr) SendULR(options ConnectionOptions) *sobek.Promise {
 				return nil, errors.WithMessage(err, "ULA Unmarshal failed")
 			}
 			return ula, nil
-		})
+		},
+	)
 }
 
 // SendRequest resolves with the raw *diam.Message Answer so callers

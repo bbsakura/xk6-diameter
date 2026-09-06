@@ -36,12 +36,14 @@ func newTestHSS(t *testing.T, delay time.Duration) *diamtest.Server {
 				time.Sleep(delay)
 			}
 			answer(c, m, settings, diam.Success)
-		}))
+		}),
+	)
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.UpdateLocation, Request: true},
 		diam.HandlerFunc(func(c diam.Conn, m *diam.Message) {
 			answer(c, m, settings, diam.Success)
-		}))
+		}),
+	)
 	return diamtest.NewServer(mux, dict.Default)
 }
 
@@ -243,7 +245,8 @@ func newTestHSSWithPush(t *testing.T) *diamtest.Server {
 		diam.HandlerFunc(func(c diam.Conn, m *diam.Message) {
 			answer(c, m, settings, diam.Success)
 			pushCLR(c, settings)
-		}))
+		}),
+	)
 	return diamtest.NewServer(mux, dict.Default)
 }
 
