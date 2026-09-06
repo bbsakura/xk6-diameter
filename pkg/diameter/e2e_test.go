@@ -224,3 +224,111 @@ func TestNewClient_AssignsUUIDv7(t *testing.T) {
 	}
 }
 
+// newTestHSSWithPush starts an HSS that, on every incoming AIR, first
+// sends an AIA back AND then pushes a server-initiated CLR to the same
+// connection. Lets tests exercise the dispatcher (Receive/Serve) via a
+// real Diameter round-trip.
+func newTestHSSWithPush(t *testing.T) *diamtest.Server {
+	t.Helper()
+	settings := &sm.Settings{
+		OriginHost:       "hss.test",
+		OriginRealm:      "test.realm",
+		VendorID:         testVendor3GPP,
+		ProductName:      "xk6-diameter-test",
+		FirmwareRevision: 1,
+	}
+	mux := sm.New(settings)
+	mux.HandleIdx(
+		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: true},
+		diam.HandlerFunc(func(c diam.Conn, m *diam.Message) {
+			answer(c, m, settings, diam.Success)
+			pushCLR(c, settings)
+		}))
+	return diamtest.NewServer(mux, dict.Default)
+}
+
+// pushCLR sends a minimal server-initiated CLR to the client c.
+func pushCLR(c diam.Conn, s *sm.Settings) {
+	clr := diam.NewRequest(diam.CancelLocation, diam.TGPP_S6A_APP_ID, dict.Default)
+	clr.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("clr;test"))
+	clr.NewAVP(avp.OriginHost, avp.Mbit, 0, s.OriginHost)
+	clr.NewAVP(avp.OriginRealm, avp.Mbit, 0, s.OriginRealm)
+	clr.NewAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity("client.test"))
+	clr.NewAVP(avp.DestinationRealm, avp.Mbit, 0, datatype.DiameterIdentity("test.realm"))
+	clr.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Enumerated(1))
+	_, _ = clr.WriteTo(c)
+}
+
+func TestE2E_Receive_CLR(t *testing.T) {
+	hss := newTestHSSWithPush(t)
+	t.Cleanup(hss.Close)
+	cli := dialClient(t, hss.Addr)
+
+	ch := cli.disp.registerRecv(Matcher{
+		CmdCode:   ptrU32(diam.CancelLocation),
+		IsRequest: ptrBool(true),
+	})
+
+	if _, err := cli.CheckSendAIR(airOpts()); err != nil {
+		t.Fatalf("CheckSendAIR: %v", err)
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Header.CommandCode != diam.CancelLocation {
+			t.Fatalf("unexpected cmd=%d", msg.Header.CommandCode)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for CLR")
+	}
+}
+
+func TestE2E_Serve_MultipleMessages(t *testing.T) {
+	hss := newTestHSSWithPush(t)
+	t.Cleanup(hss.Close)
+	cli := dialClient(t, hss.Addr)
+
+	sub := cli.disp.registerServe(Matcher{
+		CmdCode: ptrU32(diam.CancelLocation),
+	})
+	defer cli.disp.unregisterServe(sub)
+
+	const n = 3
+	for i := 0; i < n; i++ {
+		if _, err := cli.CheckSendAIR(airOpts()); err != nil {
+			t.Fatalf("CheckSendAIR[%d]: %v", i, err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		select {
+		case <-sub.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for CLR %d/%d", i+1, n)
+		}
+	}
+}
+
+func TestE2E_ReceivePrecedesServe(t *testing.T) {
+	hss := newTestHSSWithPush(t)
+	t.Cleanup(hss.Close)
+	cli := dialClient(t, hss.Addr)
+
+	serveSub := cli.disp.registerServe(Matcher{})
+	defer cli.disp.unregisterServe(serveSub)
+	recvCh := cli.disp.registerRecv(Matcher{})
+
+	if _, err := cli.CheckSendAIR(airOpts()); err != nil {
+		t.Fatalf("CheckSendAIR: %v", err)
+	}
+
+	select {
+	case <-recvCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout: Receive should have won")
+	}
+	select {
+	case <-serveSub.ch:
+		t.Fatalf("Serve must not receive when Receive matched")
+	case <-time.After(200 * time.Millisecond):
+	}
+}

@@ -130,12 +130,12 @@ type Request struct {
 // modules.VU here — a single Client can be shared across VUs via the
 // pools on RootModule.
 type Client struct {
-	id    uuid.UUID
-	cfg   *sm.Settings
-	Conn  diam.Conn
-	dict  *dict.Parser
-	corr  *correlationTbl
-	claCh chan CLAResponce
+	id   uuid.UUID
+	cfg  *sm.Settings
+	Conn diam.Conn
+	dict *dict.Parser
+	corr *correlationTbl
+	disp *dispatcher
 }
 
 // ID returns the Client's UUID v7 string — the key used by idPool /
@@ -381,21 +381,21 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		return nil, errors.WithMessage(err, "uuid.NewV7")
 	}
 	c := &Client{
-		id:    id,
-		cfg:   cfg,
-		dict:  options.Dict, // nil is fine; Dict() falls back to dict.Default
-		corr:  newCorrelationTbl(),
-		claCh: make(chan CLAResponce, 1000),
+		id:   id,
+		cfg:  cfg,
+		dict: options.Dict, // nil is fine; Dict() falls back to dict.Default
+		corr: newCorrelationTbl(),
+		disp: newDispatcher(),
 	}
 
-	// AIR/ULR (and any client-initiated arbitrary Cmd) are correlated
-	// by HBH-ID via the ALL_CMD_INDEX handler. CLR is server-initiated
-	// so it feeds a fan-in channel with no correlation.
-	mux.HandleIdx(
-		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true},
-		handleCancelLocationAnswer(c.claCh))
+	// Every incoming message hits the ALL_CMD_INDEX handler: HBH-ID
+	// correlation for pending Send*/CheckSend* first, then the
+	// dispatcher (Receive/Serve subscribers). Unclaimed messages drop.
 	mux.HandleIdx(diam.ALL_CMD_INDEX, diam.HandlerFunc(func(_ diam.Conn, m *diam.Message) {
-		c.corr.deliver(m)
+		if c.corr.deliver(m) {
+			return
+		}
+		c.disp.dispatch(m)
 	}))
 
 	dialer := &sm.Client{
@@ -596,18 +596,6 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 	}
 }
 
-func (c *Client) CheckCLA(wait int64) (int64, error) {
-	select {
-	case res := <-c.claCh:
-		if res.Error != nil {
-			return 0, res.Error
-		}
-		return int64(res.CLA.ResultCode), nil
-	case <-time.After(time.Duration(wait) * time.Second):
-		return 0, errors.New("Cancel Location timeout")
-	}
-}
-
 // ClientHdr method set mirrors Client's, except CheckSend* wrap latency
 // measurement. Connect is not exposed — Client is dialed at construction.
 func (h *ClientHdr) Close() { h.Client.Close() }
@@ -728,10 +716,6 @@ func (h *ClientHdr) CheckSendULR(options ConnectionOptions) (int64, error) {
 	return code, err
 }
 
-func (h *ClientHdr) CheckCLA(wait int64) (int64, error) {
-	return h.Client.CheckCLA(wait)
-}
-
 func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
 	state := h.vu.State()
 	if state == nil {
@@ -848,16 +832,4 @@ type ULAResponce struct {
 type CLAResponce struct {
 	CLA   CLA
 	Error error
-}
-
-func handleCancelLocationAnswer(done chan CLAResponce) diam.HandlerFunc {
-	return func(c diam.Conn, m *diam.Message) {
-		var cla CLA
-		err := m.Unmarshal(&cla)
-		if err != nil {
-			done <- CLAResponce{Error: errors.WithMessage(err, "CLA Unmarshal failed")}
-			return
-		}
-		done <- CLAResponce{CLA: cla, Error: nil}
-	}
 }
