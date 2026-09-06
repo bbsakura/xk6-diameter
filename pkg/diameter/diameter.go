@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/grafana/sobek"
 	"github.com/pkg/errors"
 	"go.k6.io/k6/js/modules"
@@ -22,15 +23,15 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
-const version = "v0.0.1"
-
 type (
-	// RootModule is the global module instance that will create module
-	// instances for each VU. dialPool keys by host (WithConnect); namedPool
-	// keys by user-supplied name (EnsureClient).
+	// RootModule is the singleton module instance shared across all VUs.
+	// namedPool caches *Client by user-supplied name (EnsureConn);
+	// idPool caches *Client by its auto-assigned UUID v7 (GetConn).
+	// A Conn dialed via EnsureConn ends up in both pools; one dialed via
+	// NewConn ends up in idPool only.
 	RootModule struct {
-		dialPool  *sync.Map
-		namedPool *sync.Map
+		namedPool *sync.Map // string → *Client
+		idPool    *sync.Map // uuid.UUID → *Client
 		mu        sync.Mutex
 		once      sync.Once
 		tags      *metrics.TagSet
@@ -38,9 +39,7 @@ type (
 
 	// ModuleInstance represents an instance of the module for every VU.
 	ModuleInstance struct {
-		Version  string
 		vu       modules.VU
-		exports  map[string]interface{}
 		rm       *RootModule
 		mLatency *metrics.Metric
 	}
@@ -53,8 +52,8 @@ var (
 
 func New() *RootModule {
 	return &RootModule{
-		dialPool:  new(sync.Map),
 		namedPool: new(sync.Map),
+		idPool:    new(sync.Map),
 	}
 }
 
@@ -65,25 +64,22 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	rm.once.Do(func() {
 		rm.tags = reg.RootTagSet().With("module", "diameter")
 	})
-	mi := &ModuleInstance{
-		Version:  version,
+	return &ModuleInstance{
 		vu:       vu,
-		exports:  make(map[string]interface{}),
 		rm:       rm,
 		mLatency: reg.MustNewMetric("diameter_tx_duration", metrics.Trend, metrics.Time),
 	}
-	mi.exports["K6DiameterClient"] = mi.NewK6DiameterClient
-	mi.exports["K6DiameterClientWithConnect"] = mi.NewK6DiameterClientWithConnect
-	mi.exports["Client"] = mi.NewClient
-	mi.exports["EnsureClient"] = mi.EnsureClient
-	return mi
 }
 
 // Exports implements the modules.Instance interface and returns the exports
 // of the JS module.
 func (mi *ModuleInstance) Exports() modules.Exports {
 	return modules.Exports{
-		Named: mi.exports,
+		Named: map[string]interface{}{
+			"Conn":       mi.NewConn,
+			"EnsureConn": mi.EnsureConn,
+			"GetConn":    mi.GetConn,
+		},
 	}
 }
 
@@ -134,12 +130,17 @@ type Request struct {
 // modules.VU here — a single Client can be shared across VUs via the
 // pools on RootModule.
 type Client struct {
+	id    uuid.UUID
 	cfg   *sm.Settings
 	Conn  diam.Conn
 	dict  *dict.Parser
 	corr  *correlationTbl
 	claCh chan CLAResponce
 }
+
+// ID returns the Client's UUID v7 string — the key used by idPool /
+// GetConn to look this Client back up across VUs.
+func (c *Client) ID() string { return c.id.String() }
 
 // Dict returns the dictionary attached to this Client. Callers building
 // Diameter messages directly (e.g. via diam.NewRequest) can pass this
@@ -214,38 +215,6 @@ func (c *ModuleInstance) newClientHdr(cli *Client) *ClientHdr {
 	}
 }
 
-func (c *ModuleInstance) NewK6DiameterClientWithConnect(call sobek.ConstructorCall) *sobek.Object {
-	c.rm.mu.Lock()
-	defer c.rm.mu.Unlock()
-	op := call.Arguments[0].Export()
-	options, err := MapToConnectionOptions(op.(map[string]interface{}))
-	if err != nil {
-		panic(err)
-	}
-	cli := c.rm.connGetPool(options.Host)
-	if cli == nil {
-		cli = &Client{}
-		_, err := cli.Connect(options)
-		if err != nil {
-			panic(err)
-		}
-		c.rm.connSetPool(options.Host, cli)
-	}
-	rt := c.vu.Runtime()
-	return rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
-}
-
-func (c *RootModule) connSetPool(host string, diam *Client) {
-	c.dialPool.Store(host, diam)
-}
-
-func (c *RootModule) connGetPool(host string) *Client {
-	if diam, ok := c.dialPool.Load(host); ok {
-		return diam.(*Client)
-	}
-	return nil
-}
-
 func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error) {
 	var co ConnectionOptions
 
@@ -313,45 +282,86 @@ func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
 	}
 }
 
-func (c *ModuleInstance) NewK6DiameterClient(call sobek.ConstructorCall) *sobek.Object {
-	return c.NewClient(call)
+// NewConn is the JS constructor for `new diameter.Conn(options)`.
+// It dials the peer immediately, registers the *Client in idPool, and
+// exposes the UUID v7 key on the returned object as `.id` so JS can
+// pass it to GetConn later.
+func (c *ModuleInstance) NewConn(call sobek.ConstructorCall) *sobek.Object {
+	if len(call.Arguments) != 1 {
+		panic(errors.Errorf("Conn constructor: expected 1 argument (options), got %d", len(call.Arguments)))
+	}
+	op, ok := call.Arguments[0].Export().(map[string]interface{})
+	if !ok {
+		panic(errors.New("Conn constructor: options must be an object"))
+	}
+	options, err := MapToConnectionOptions(op)
+	if err != nil {
+		panic(err)
+	}
+	cli, err := NewClient(options)
+	if err != nil {
+		panic(err)
+	}
+	c.rm.idPool.Store(cli.id, cli)
+	return c.wrapClient(cli)
 }
 
-// NewClient returns a fresh, unconnected ClientHdr. The underlying
-// *Client is not registered in any pool — its lifetime is tied to the
-// JS reference. Use EnsureClient for cross-VU shared instances.
-func (c *ModuleInstance) NewClient(_ sobek.ConstructorCall) *sobek.Object {
-	rt := c.vu.Runtime()
-	return rt.ToValue(c.newClientHdr(&Client{})).ToObject(rt)
-}
-
-// EnsureClient returns a ClientHdr wrapping a *Client from the named
-// pool. If no entry exists for name, it connects a new *Client using
-// params and registers it. params has the same shape as ConnectionOptions.
-func (c *ModuleInstance) EnsureClient(name string, params map[string]interface{}) *sobek.Object {
+// EnsureConn returns a ClientHdr wrapping a shared *Client from the
+// named pool so multiple VUs reuse a single Diameter connection. If no
+// entry exists for name, it dials a new *Client using params and
+// registers it in both namedPool and idPool.
+func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) *sobek.Object {
 	c.rm.mu.Lock()
 	defer c.rm.mu.Unlock()
-	rt := c.vu.Runtime()
 	if v, ok := c.rm.namedPool.Load(name); ok {
-		return rt.ToValue(c.newClientHdr(v.(*Client))).ToObject(rt)
+		return c.wrapClient(v.(*Client))
 	}
 	options, err := MapToConnectionOptions(params)
 	if err != nil {
 		panic(err)
 	}
-	cli := &Client{}
-	if _, err := cli.Connect(options); err != nil {
+	cli, err := NewClient(options)
+	if err != nil {
 		panic(err)
 	}
 	c.rm.namedPool.Store(name, cli)
-	return rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
+	c.rm.idPool.Store(cli.id, cli)
+	return c.wrapClient(cli)
 }
 
-func (c *Client) Connect(options ConnectionOptions) (bool, error) {
-	if len(options.Addr) == 0 {
-		return false, errors.New("missing addr")
+// GetConn returns a ClientHdr for a previously registered *Client
+// identified by the UUID v7 string exposed on `.id`. Panics if id is
+// not a valid UUID or has no live Client.
+func (c *ModuleInstance) GetConn(id string) *sobek.Object {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		panic(errors.WithMessagef(err, "GetConn: invalid uuid %q", id))
 	}
-	hostIPAddresses := []datatype.Address{}
+	v, ok := c.rm.idPool.Load(uid)
+	if !ok {
+		panic(errors.Errorf("GetConn: Conn with id %q not found", id))
+	}
+	return c.wrapClient(v.(*Client))
+}
+
+// wrapClient builds a ClientHdr for the current VU and exposes the
+// underlying Client's UUID as a JS `.id` property on the returned
+// object.
+func (c *ModuleInstance) wrapClient(cli *Client) *sobek.Object {
+	rt := c.vu.Runtime()
+	obj := rt.ToValue(c.newClientHdr(cli)).ToObject(rt)
+	_ = obj.Set("id", cli.id.String())
+	return obj
+}
+
+// NewClient dials the peer immediately and returns a fully-initialized
+// Client. Conn is guaranteed non-nil on success; on failure the caller
+// receives no partial Client to clean up.
+func NewClient(options ConnectionOptions) (*Client, error) {
+	if len(options.Addr) == 0 {
+		return nil, errors.New("missing addr")
+	}
+	hostIPAddresses := make([]datatype.Address, 0, len(options.HostIPAddresses))
 	for _, ip := range options.HostIPAddresses {
 		hostIPAddresses = append(hostIPAddresses, datatype.Address(net.ParseIP(ip)))
 	}
@@ -366,9 +376,29 @@ func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 	}
 	mux := sm.New(cfg)
 
-	c.dict = options.Dict // nil is fine; Dict() falls back to dict.Default
+	id, err := uuid.NewV7()
+	if err != nil {
+		return nil, errors.WithMessage(err, "uuid.NewV7")
+	}
+	c := &Client{
+		id:    id,
+		cfg:   cfg,
+		dict:  options.Dict, // nil is fine; Dict() falls back to dict.Default
+		corr:  newCorrelationTbl(),
+		claCh: make(chan CLAResponce, 1000),
+	}
 
-	cli := &sm.Client{
+	// AIR/ULR (and any client-initiated arbitrary Cmd) are correlated
+	// by HBH-ID via the ALL_CMD_INDEX handler. CLR is server-initiated
+	// so it feeds a fan-in channel with no correlation.
+	mux.HandleIdx(
+		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true},
+		handleCancelLocationAnswer(c.claCh))
+	mux.HandleIdx(diam.ALL_CMD_INDEX, diam.HandlerFunc(func(_ diam.Conn, m *diam.Message) {
+		c.corr.deliver(m)
+	}))
+
+	dialer := &sm.Client{
 		Dict:             c.Dict(),
 		Handler:          mux,
 		MaxRetransmits:   options.Retries,
@@ -387,27 +417,12 @@ func (c *Client) Connect(options ConnectionOptions) (bool, error) {
 		},
 	}
 
-	conn, err := cli.DialNetwork(options.NetworkType, options.Addr)
+	conn, err := dialer.DialNetwork(options.NetworkType, options.Addr)
 	if err != nil {
-		return false, errors.WithMessage(err, "Dial error")
+		return nil, errors.WithMessage(err, "Dial error")
 	}
-	// Set MessageHandler. Any client-initiated Answer (AIR/ULR and any
-	// arbitrary Cmd sent via SendRequest) is routed by HBH-ID through
-	// the CorrelationTbl via the catch-all handler. CLR is server-
-	// initiated and gets a specific handler that feeds a fan-in channel.
-	c.corr = newCorrelationTbl()
-	c.claCh = make(chan CLAResponce, 1000)
-
-	mux.HandleIdx(
-		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.CancelLocation, Request: true},
-		handleCancelLocationAnswer(c.claCh))
-	mux.HandleIdx(diam.ALL_CMD_INDEX, diam.HandlerFunc(func(_ diam.Conn, m *diam.Message) {
-		c.corr.deliver(m)
-	}))
-
 	c.Conn = conn
-	c.cfg = cfg
-	return true, nil
+	return c, nil
 }
 
 func (c *Client) Close() {
@@ -593,14 +608,8 @@ func (c *Client) CheckCLA(wait int64) (int64, error) {
 	}
 }
 
-// ClientHdr delegates: keep the JS-visible method set identical to the
-// pre-refactor Client. Only CheckSend* wrap latency measurement — the
-// underlying message send/receive path on *Client is unchanged.
-
-func (h *ClientHdr) Connect(options ConnectionOptions) (bool, error) {
-	return h.Client.Connect(options)
-}
-
+// ClientHdr method set mirrors Client's, except CheckSend* wrap latency
+// measurement. Connect is not exposed — Client is dialed at construction.
 func (h *ClientHdr) Close() { h.Client.Close() }
 
 // SendAIR returns a JS Promise that resolves with the decoded AIA

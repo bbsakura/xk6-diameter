@@ -11,6 +11,7 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/diamtest"
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
+	"github.com/google/uuid"
 )
 
 const testVendor3GPP = 10415
@@ -65,8 +66,7 @@ func answer(c diam.Conn, m *diam.Message, s *sm.Settings, code uint32) {
 
 func dialClient(t *testing.T, addr string) *Client {
 	t.Helper()
-	cli := &Client{}
-	_, err := cli.Connect(ConnectionOptions{
+	cli, err := NewClient(ConnectionOptions{
 		Addr:            addr,
 		Host:            "client.test",
 		Realm:           "test.realm",
@@ -77,13 +77,13 @@ func dialClient(t *testing.T, addr string) *Client {
 		AppId:           diam.TGPP_S6A_APP_ID,
 	})
 	if err != nil {
-		t.Fatalf("Connect: %v", err)
+		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(cli.Close)
 	// Wait briefly for CER/CEA to complete so peer metadata is ready.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if cli.Conn != nil && cli.Conn.Context() != nil {
+		if cli.Conn.Context() != nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -209,3 +209,18 @@ type errUnexpectedCode int64
 func (e errUnexpectedCode) Error() string {
 	return "unexpected result code"
 }
+
+func TestNewClient_AssignsUUIDv7(t *testing.T) {
+	hss := newTestHSS(t, 0)
+	t.Cleanup(hss.Close)
+	cli := dialClient(t, hss.Addr)
+
+	got, err := uuid.Parse(cli.ID())
+	if err != nil {
+		t.Fatalf("ID() not a valid UUID: %v", err)
+	}
+	if v := got.Version(); v != uuid.Version(7) {
+		t.Fatalf("ID version = %d; want 7", v)
+	}
+}
+

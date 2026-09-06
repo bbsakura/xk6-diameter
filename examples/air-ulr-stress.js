@@ -5,36 +5,23 @@ example stress test for AIR and ULR
 import { check } from "k6";
 import diameter from "k6/x/diameter";
 
-let client;
-
 export const options = {
     tags: { name: "diameter" },
 };
 
+const connOpts = {
+    addr: "127.0.0.1:3868",
+    host: "magma-oai.openair4G.eur",
+    realm: "openair4G.eur",
+    network_type: "tcp",
+    retries: 0,
+    vendor_id: 10415,
+    product_name: "xk6-diameter",
+    hostipaddresses: ["127.0.0.1"],
+};
+const client = diameter.EnsureConn("hss-primary", connOpts);
+
 export default function () {
-    if (client == null) {
-        client = new diameter.K6DiameterClient();
-    }
-    try {
-        const result = client.connect({
-            addr: "127.0.0.1:3868",
-            host: "magma-oai.openair4G.eur",
-            realm: "openair4G.eur",
-            network_type: "tcp",
-            retries: 0,
-            vendor_id: 10415,
-            product_name: "xk6-diameter",
-            hostipaddresses: ["127.0.0.1"],
-        });
-        check(result, {
-            "Connected": (result) => result == true,
-        });
-    } catch (error) {
-        check(null, {
-            "Connected": false,
-        });
-        return;
-    }
     for (let i = 0; i < 4096; i++) {
         try {
             const airRes = client.checkSendAIR({
@@ -95,5 +82,5 @@ export default function () {
             });
         }
     }
-    client.close();
+    // Do not close: the Conn is shared across VUs/iterations via EnsureConn.
 }

@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/fiorix/go-diameter/v4 v4.3.0
+	github.com/google/uuid v1.6.0
 	github.com/grafana/sobek v0.0.0-20260603163334-74c003c83a50
 	github.com/pkg/errors v0.9.1
 	go.k6.io/k6 v1.7.1
@@ -20,7 +21,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230728192033-2ba5b33183c6 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20251114114122-19ddcbc6aae2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
