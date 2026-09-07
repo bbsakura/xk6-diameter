@@ -1,22 +1,16 @@
 
 /*
-example stress test for AIR and ULR
+smoke test: EnsureConn returns a shared Diameter connection.
 */
-import { check } from "k6";
 import diameter from "k6/x/diameter";
-
-let client;
 
 export const options = {
     tags: { name: "diameter" },
 };
 
 export default function () {
-    if (client == null) {
-        client = new diameter.K6DiameterClient();
-    }
     try {
-        const result = client.connect({
+        diameter.EnsureConn("hss-primary", {
             addr: "127.0.0.1:3868",
             host: "magma-oai.openair4G.eur",
             realm: "openair4G.eur",
@@ -26,12 +20,11 @@ export default function () {
             product_name: "xk6-diameter",
             hostipaddresses: ["127.0.0.1"],
         });
-        return 1;
-     } catch (e) {
-         if (e.message.includes("i/o timeout")) {
-                return 0;
-            }
+    } catch (e) {
+        if (e.message && e.message.includes("i/o timeout")) {
+            return 0;
+        }
         return e;
     }
-
+    return 1;
 }

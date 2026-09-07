@@ -4,7 +4,7 @@
 
 # startup hss-server for tests
 pkill hss-server
-./out/bin/hss-server -network_type sctp >/dev/null 2>&1 &
+./out/bin/hss-server >/dev/null 2>&1 &
 
 sleep 2
 
@@ -16,7 +16,7 @@ trap cleanup EXIT
 
 function run_xk6diameter() {
     local jsfile=$1
-    ./out/bin/xk6 run $jsfile 2> /dev/null
+    ./out/bin/k6 run $jsfile 2> /dev/null
 }
 
 # execute test scenarios

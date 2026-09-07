@@ -1,65 +1,23 @@
 package diameter
 
 import (
-	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 )
 
-func toGrouped(v interface{}) (datatype.Type, error) {
-	val, ok := v.([]interface{})
-	if !ok {
-		return nil, &ErrInvalidType{Value: v, Want: "[]map[string]interface{}"}
-	}
-	var members []*diam.AVP
-	for _, item := range val {
-		internalAvp, ok := item.(map[string]interface{})
-		if !ok {
-			return nil, &ErrInvalidType{Value: item, Want: "map[string]interface{}"}
-		}
-		key, ok := internalAvp["key"].(string)
-		if !ok {
-			return nil, &ErrInvalidType{Value: internalAvp["key"], Want: "string"}
-		}
-		value, ok := internalAvp["value"]
-		if !ok {
-			return nil, &ErrNoValue{key}
-		}
-
-		avpMeta, ok := avpDict[key]
-		if !ok {
-			return nil, &ErrNotFound{key}
-		}
-		val, err := avpMeta.converter(value)
-		if err != nil {
-			return nil, err
-		}
-		members = append(members, diam.NewAVP(avpMeta.code, avpMeta.flag, avpMeta.vendor, val))
-	}
-	return &diam.GroupedAVP{AVP: members}, nil
-}
-
 func toUTF8String(v interface{}) (datatype.Type, error) {
-	val, ok := v.(string)
-	if !ok {
-		v, err := convertInt64SliceToString(v)
-		if err != nil {
-			return nil, err
-		}
-		val = v
+	s, err := toStringBytes(v)
+	if err != nil {
+		return nil, err
 	}
-	return datatype.UTF8String(val), nil
+	return datatype.UTF8String(s), nil
 }
 
 func toOctetString(v interface{}) (datatype.Type, error) {
-	val, ok := v.(string)
-	if !ok {
-		v, err := convertInt64SliceToString(v)
-		if err != nil {
-			return nil, err
-		}
-		val = v
+	s, err := toStringBytes(v)
+	if err != nil {
+		return nil, err
 	}
-	return datatype.OctetString(val), nil
+	return datatype.OctetString(s), nil
 }
 
 func toEnumerated(v interface{}) (datatype.Type, error) {
@@ -78,14 +36,32 @@ func toUnsigned32(v interface{}) (datatype.Type, error) {
 	return datatype.Unsigned32(val), nil
 }
 
-func convertInt64SliceToString(v interface{}) (string, error) {
-	bval, ok := v.([]interface{})
-	if !ok {
-		return "", &ErrInvalidType{Value: v, Want: "string or []byte"}
+// toStringBytes accepts the three forms sobek surfaces for byte-ish data:
+// a JS string (Go string), a Go []byte (from Uint8Array/ArrayBuffer via
+// sobek Runtime.NewArrayBuffer paths), or a JS array of small integers
+// like `[0x05, 0x0a]` which sobek exports as []interface{} of int64.
+func toStringBytes(v interface{}) (string, error) {
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	case []byte:
+		return string(x), nil
+	case []interface{}:
+		return convertInt64SliceToString(x)
 	}
-	var bites []byte
+	return "", &ErrInvalidType{Value: v, Want: "string, []byte, or []int"}
+}
+
+func convertInt64SliceToString(bval []interface{}) (string, error) {
+	bites := make([]byte, 0, len(bval))
 	for _, in := range bval {
-		v := in.(int64)
+		v, ok := in.(int64)
+		if !ok {
+			return "", &ErrInvalidType{Value: in, Want: "int64"}
+		}
+		if v < 0 || v > 255 {
+			return "", &ErrInvalidType{Value: v, Want: "byte (0..255)"}
+		}
 		bites = append(bites, byte(v))
 	}
 	return string(bites), nil

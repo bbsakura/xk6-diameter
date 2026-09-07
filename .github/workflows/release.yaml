@@ -42,4 +42,4 @@ jobs:
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ needs.release-please.outputs.tag_name }} ./out/bin/xk6
+        run: gh release upload ${{ needs.release-please.outputs.tag_name }} ./out/bin/k6

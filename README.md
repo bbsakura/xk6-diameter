@@ -30,6 +30,10 @@ make build
 
 ## Support scenario
 
+## Docs
+
+- [Receiving messages: `receive` / `subscribe` / `serve`](docs/receiving-messages.md) — server-initiated Request や orphan Answer を JS 側で拾う API と Matcher の書き方。
+
 ## Developers Settings
 
 ```shell
