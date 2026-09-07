@@ -11,12 +11,15 @@ import (
 const serveBufSize = 256
 
 // dispatcher routes incoming Diameter messages that were NOT matched
-// by the HBH-ID correlationTbl to caller-registered subscribers.
+// by the HBH-ID correlationTbl to caller-registered subscribers. Every
+// tier delivers to exactly one subscriber, giving worker-pool semantics
+// when multiple VUs subscribe to the same shared *Client:
 //
-// Precedence per message:
 //  1. correlationTbl (Send*/CheckSend* pending) — handled upstream.
 //  2. recvs (Receive one-shots) — FIFO, first match wins and is removed.
-//  3. serves (Serve streams) — fan out to every matching subscription.
+//  3. serves (Serve/Subscribe streams) — FIFO, first match with buffer
+//     capacity wins. Skips full subscribers to load-balance and to
+//     avoid dropping while another subscriber has slack.
 type dispatcher struct {
 	mu     sync.Mutex
 	recvs  []*recvSub
@@ -95,18 +98,17 @@ func (d *dispatcher) dispatch(msg *diam.Message) bool {
 			return true
 		}
 	}
-	// Serve fan-out.
-	delivered := false
+	// Serve: first matching sub with buffer capacity wins. Full subs
+	// are skipped so a slow consumer does not stall an idle peer.
 	for _, s := range d.serves {
 		if !s.m.match(msg) {
 			continue
 		}
 		select {
 		case s.ch <- msg:
-			delivered = true
+			return true
 		default:
-			// buffer full; drop
 		}
 	}
-	return delivered
+	return false
 }

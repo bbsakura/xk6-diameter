@@ -4,11 +4,13 @@
 
 ## 優先順位
 
-1 通のメッセージが到着すると、次の順で最初にマッチしたパスにだけ届く。
+1 通のメッセージは **1 つの subscriber にだけ** 配信される。 fan-out
+はしない。 N 個の VU が同じ Conn / 同じ matcher で購読を張れば、自然に
+ワーカプールになる。
 
-1. **HBH-ID 相関** — `sendRequest` / `checkSendAIR` などが登録した pending Send に該当する Answer は自動でそちらへ。
-2. **`receive`** — マッチした最も古い one-shot 待ちに 1 通配信して登録解除。
-3. **`serve`** / **`subscribe`** — マッチした全 subscription に fan-out (channel が満杯なら drop)。
+1. **HBH-ID 相関** — `sendRequest` / `checkSendAIR` などが登録した pending Send に該当する Answer は自動でそちらへ (Answer のみ、Request は 2/3 に降りる)。
+2. **`receive`** — マッチした最も古い one-shot 待ちに配信し登録解除。 該当があれば 3 へ降りない。
+3. **`subscribe`** / **`serve`** — 登録順に走査し、マッチしてかつバッファに空きがある最初の subscription に配信。 満杯の subscription はスキップして次の候補を試すので、遅い consumer が peer を止めない。 該当ゼロなら drop。
 
 ## Matcher
 
@@ -118,7 +120,7 @@ try {
 ```
 
 - `sub.recv()` は close 済み、または iteration 終了時に reject。
-- 内部バッファ 256 通。消費が追いつかない場合、新規到着は drop される (blocking しない)。
+- 内部バッファ 256 通。 このバッファが満杯だと dispatcher は次にマッチする subscription にスキップする。 全 subscription が満杯なら drop。
 
 ## `conn.serve(matcher, cb) : ServeHandle` (callback)
 
@@ -154,14 +156,8 @@ handle.close();
 
 ## 完全な例: CLR を非同期に処理する
 
-**重要**: `subscribe` / `serve` は「登録した VU の handle」に対して
-配信される。共有 Conn に対して N VU がそれぞれ module-scope で登録
-すると、1 通の CLR が **N 回** fan-out される。またモジュール scope
-は teardown とは別 runtime なので、default() 起動 VU の handle を
-teardown() で close することはできない。
-
-したがって共有 Conn + fan-out 監視を書くときは default() 内で
-subscribe/close する:
+配信は先着 1 subscription なので、N VU が同じ Conn に対して subscribe/serve
+を張れば自然にワーカプールになる:
 
 ```js
 import diameter from "k6/x/diameter";
@@ -176,9 +172,9 @@ const connOpts = {
   hostipaddresses: ["127.0.0.1"],
 };
 
-export default async function () {
-  const conn = diameter.EnsureConn("hss", connOpts);
+const conn = diameter.EnsureConn("hss", connOpts);
 
+export default async function () {
   const sub = conn.subscribe({ cmd_code: "CLR", is_request: true });
   const clrLoop = (async () => {
     try {
@@ -197,13 +193,11 @@ export default async function () {
 }
 ```
 
-「複数 VU で 1 通の CLR を **1 回だけ** 誰かに処理させたい」場合は
-`serve`/`subscribe` ではなく `receive` を使う (FIFO 先着なので複数
-VU が同じ matcher で待っていても取るのは 1 VU だけ):
+1 通の CLR に対する簡潔版として、iteration 内で `receive` を直接使う
+パターンも同じセマンティクス (先着 1 VU が取る):
 
 ```js
 export default async function () {
-  const conn = diameter.EnsureConn("hss", connOpts);
   const clr = await conn.receive({ cmd_code: "CLR", is_request: true });
   console.log("CLR:", clr.Header.HopByHopID);
 }
@@ -211,6 +205,6 @@ export default async function () {
 
 ## 注意点
 
-- **共有 Conn では subscription も共有される**。`EnsureConn` で複数 VU が同じ `Conn` を掴んでいる場合、ある VU が登録した `receive` は他 VU 宛の Request も食う可能性がある。VU ごとに分けたい場合は `avps` で `Session-Id` / `User-Name` を絞る。
+- **共有 Conn では subscription も共有される**。`EnsureConn` で複数 VU が同じ `Conn` を掴んでいる場合、あるメッセージは登録順で先着 1 subscription にしか届かない。特定 VU に配りたい場合は `avps` で `Session-Id` / `User-Name` を絞る。
 - **iteration 終了時に pending な `receive` / `sub.recv()` は reject** される。`await` を残したまま iteration が抜けないよう注意。
-- **buffer 満杯時は drop**。厳密な取り逃しゼロが必要なら consumer 側で `recv` を高頻度で回す。
+- **全 subscription が満杯なら drop**。厳密な取り逃しゼロが必要なら consumer 側で `recv` を高頻度で回すか、subscription を増やす。

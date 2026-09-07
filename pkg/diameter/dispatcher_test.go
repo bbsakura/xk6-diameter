@@ -70,24 +70,43 @@ func TestDispatcher_ReceivePrecedesServe(t *testing.T) {
 	}
 }
 
-func TestDispatcher_Serve_FanOut(t *testing.T) {
+func TestDispatcher_Serve_FirstMatchWins(t *testing.T) {
 	d := newDispatcher()
 	s1 := d.registerServe(Matcher{})
 	s2 := d.registerServe(Matcher{})
-	s3 := d.registerServe(Matcher{CmdCode: ptrU32(999)}) // non-match
 
 	d.dispatch(newTestMsg(1, true))
-	for i, s := range []*serveSub{s1, s2} {
-		select {
-		case <-s.ch:
-		default:
-			t.Fatalf("serve %d should have received", i)
-		}
+	select {
+	case <-s1.ch:
+	default:
+		t.Fatalf("oldest matching serve should have received")
 	}
 	select {
-	case <-s3.ch:
-		t.Fatalf("non-matching serve should not receive")
+	case <-s2.ch:
+		t.Fatalf("second serve must not receive under first-match-wins")
 	default:
+	}
+}
+
+func TestDispatcher_Serve_SkipsFullSub(t *testing.T) {
+	d := newDispatcher()
+	s1 := d.registerServe(Matcher{})
+	s2 := d.registerServe(Matcher{})
+
+	// Saturate s1's buffer.
+	for i := 0; i < serveBufSize; i++ {
+		d.dispatch(newTestMsg(uint32(i), true))
+	}
+	if len(s1.ch) != serveBufSize {
+		t.Fatalf("precondition: s1 not saturated; got %d", len(s1.ch))
+	}
+	if len(s2.ch) != 0 {
+		t.Fatalf("precondition: s2 non-empty; got %d", len(s2.ch))
+	}
+	// Next message must overflow to s2.
+	d.dispatch(newTestMsg(999, true))
+	if len(s2.ch) != 1 {
+		t.Fatalf("s2 should have received the overflow; got %d", len(s2.ch))
 	}
 }
 
