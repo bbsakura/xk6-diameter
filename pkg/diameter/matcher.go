@@ -2,6 +2,7 @@ package diameter
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -109,7 +110,10 @@ func avpFilterMatch(msg *diam.Message, f AVP) bool {
 }
 
 // MapToMatcher parses a JS-supplied options object into a Matcher and
-// pre-resolves AVP filters against dict.Default.
+// pre-resolves AVP filters against dict.Default. Present-but-mistyped
+// fields are rejected rather than silently ignored, so a typo like
+// `app_id: "1"` cannot broaden the matcher into a wildcard that
+// consumes unrelated messages.
 //
 // Keys: app_id, cmd_code, is_request, avps.
 //
@@ -117,34 +121,53 @@ func avpFilterMatch(msg *diam.Message, f AVP) bool {
 // Name / Short / Short+R|A suffix), resolved via dict.Default. An
 // unknown string resolves to cmdCodeNoMatch — the matcher never
 // matches, mirroring the behavior of unknown AVP keys in avp filters.
-func MapToMatcher(m map[string]interface{}) Matcher {
+func MapToMatcher(m map[string]interface{}) (Matcher, error) {
 	var out Matcher
-	if v, ok := m["app_id"].(int64); ok {
+	if raw, present := m["app_id"]; present {
+		v, ok := raw.(int64)
+		if !ok {
+			return Matcher{}, fmt.Errorf("matcher: app_id must be number, got %T", raw)
+		}
 		u := uint32(v)
 		out.AppID = &u
 	}
-	switch v := m["cmd_code"].(type) {
-	case int64:
-		u := uint32(v)
-		out.CmdCode = &u
-	case string:
-		if code, ok := resolveCmdName(v); ok {
-			out.CmdCode = &code
-		} else {
-			never := cmdCodeNoMatch
-			out.CmdCode = &never
+	if raw, present := m["cmd_code"]; present {
+		switch v := raw.(type) {
+		case int64:
+			u := uint32(v)
+			out.CmdCode = &u
+		case string:
+			if code, ok := resolveCmdName(v); ok {
+				out.CmdCode = &code
+			} else {
+				never := cmdCodeNoMatch
+				out.CmdCode = &never
+			}
+		default:
+			return Matcher{}, fmt.Errorf("matcher: cmd_code must be number or string, got %T", raw)
 		}
 	}
-	if v, ok := m["is_request"].(bool); ok {
+	if raw, present := m["is_request"]; present {
+		v, ok := raw.(bool)
+		if !ok {
+			return Matcher{}, fmt.Errorf("matcher: is_request must be boolean, got %T", raw)
+		}
 		out.IsRequest = &v
 	}
-	if v, ok := m["avps"].([]interface{}); ok {
-		for _, item := range v {
+	if raw, present := m["avps"]; present {
+		items, ok := raw.([]interface{})
+		if !ok {
+			return Matcher{}, fmt.Errorf("matcher: avps must be array, got %T", raw)
+		}
+		for i, item := range items {
 			pair, ok := item.(map[string]interface{})
 			if !ok {
-				continue
+				return Matcher{}, fmt.Errorf("matcher: avps[%d] must be object, got %T", i, item)
 			}
-			key, _ := pair["key"].(string)
+			key, ok := pair["key"].(string)
+			if !ok {
+				return Matcher{}, fmt.Errorf("matcher: avps[%d].key must be string, got %T", i, pair["key"])
+			}
 			out.AVPs = append(out.AVPs, AVP{Key: key, Value: pair["value"]})
 		}
 	}
@@ -153,7 +176,7 @@ func MapToMatcher(m map[string]interface{}) Matcher {
 		appID = *out.AppID
 	}
 	out.compiled = compileAVPs(out.AVPs, appID)
-	return out
+	return out, nil
 }
 
 // compileAVPs resolves each AVP filter against dict.Default at

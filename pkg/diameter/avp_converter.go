@@ -59,6 +59,9 @@ func convertInt64SliceToString(bval []interface{}) (string, error) {
 		if !ok {
 			return "", &ErrInvalidType{Value: in, Want: "int64"}
 		}
+		if v < 0 || v > 255 {
+			return "", &ErrInvalidType{Value: v, Want: "byte (0..255)"}
+		}
 		bites = append(bites, byte(v))
 	}
 	return string(bites), nil

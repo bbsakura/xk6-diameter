@@ -142,8 +142,17 @@ func TestMatcher_Header_AND_AVP(t *testing.T) {
 	}
 }
 
+func mustMapToMatcher(t *testing.T, m map[string]interface{}) Matcher {
+	t.Helper()
+	out, err := MapToMatcher(m)
+	if err != nil {
+		t.Fatalf("MapToMatcher: %v", err)
+	}
+	return out
+}
+
 func TestMapToMatcher(t *testing.T) {
-	m := MapToMatcher(map[string]interface{}{
+	m := mustMapToMatcher(t, map[string]interface{}{
 		"app_id":     int64(diam.TGPP_S6A_APP_ID),
 		"cmd_code":   int64(diam.AuthenticationInformation),
 		"is_request": true,
@@ -166,34 +175,56 @@ func TestMapToMatcher(t *testing.T) {
 }
 
 func TestMapToMatcher_Empty(t *testing.T) {
-	m := MapToMatcher(map[string]interface{}{})
+	m := mustMapToMatcher(t, map[string]interface{}{})
 	if m.AppID != nil || m.CmdCode != nil || m.IsRequest != nil || len(m.AVPs) != 0 {
 		t.Fatalf("expected all-wildcard matcher, got %+v", m)
 	}
 }
 
 func TestMapToMatcher_CmdCode_StringLongName(t *testing.T) {
-	m := MapToMatcher(map[string]interface{}{"cmd_code": "Authentication-Information"})
+	m := mustMapToMatcher(t, map[string]interface{}{"cmd_code": "Authentication-Information"})
 	if m.CmdCode == nil || *m.CmdCode != diam.AuthenticationInformation {
 		t.Fatalf("long name should resolve to AIR code; got %v", m.CmdCode)
 	}
 }
 
 func TestMapToMatcher_CmdCode_StringShort(t *testing.T) {
-	m := MapToMatcher(map[string]interface{}{"cmd_code": "AIR"})
+	m := mustMapToMatcher(t, map[string]interface{}{"cmd_code": "AIR"})
 	if m.CmdCode == nil || *m.CmdCode != diam.AuthenticationInformation {
 		t.Fatalf("short name should resolve to AIR code; got %v", m.CmdCode)
 	}
 }
 
 func TestMapToMatcher_CmdCode_UnknownString_MatchesNothing(t *testing.T) {
-	m := MapToMatcher(map[string]interface{}{"cmd_code": "No-Such-Cmd"})
-	// Unknown name → sentinel; matcher never matches a real msg.
+	m := mustMapToMatcher(t, map[string]interface{}{"cmd_code": "No-Such-Cmd"})
 	if m.CmdCode == nil {
 		t.Fatalf("expected sentinel CmdCode, got nil")
 	}
 	msg := buildTestRequest(t)
 	if m.match(msg) {
 		t.Fatalf("matcher with unknown cmd name should not match anything")
+	}
+}
+
+func TestMapToMatcher_RejectsInvalidTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]interface{}
+	}{
+		{"app_id string", map[string]interface{}{"app_id": "16777251"}},
+		{"cmd_code bool", map[string]interface{}{"cmd_code": true}},
+		{"is_request int", map[string]interface{}{"is_request": int64(1)}},
+		{"avps not array", map[string]interface{}{"avps": "not-array"}},
+		{"avps element not object", map[string]interface{}{"avps": []interface{}{"str"}}},
+		{"avps element key not string", map[string]interface{}{"avps": []interface{}{
+			map[string]interface{}{"key": int64(1), "value": "x"},
+		}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := MapToMatcher(tc.in); err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+		})
 	}
 }

@@ -69,17 +69,29 @@ const conn = diameter.EnsureConn("hss", { /* connect opts */ });
 export default async function () {
   const req = await conn.receive({ cmd_code: "CLR", is_request: true });
   console.log("got CLR from", req.Header.OriginHost);
-  // Answer を返したい場合は自前で組み立てて conn.sendRequest(...) する
+  // 現状 API は受信側の Answer 送信を提供していない。将来 `SendAnswer`
+  // 相当を追加予定。 (echo する HBH-ID / E2E-ID を保持したまま Answer を
+  // 組み立てる必要があり、`sendRequest` は新 HBH-ID を割り当てるため代用
+  // できない。)
 }
 ```
 
-タイムアウトが要る場合は `Promise.race` で:
+タイムアウトを付けたい場合は `Promise.race` は使えない — 敗者側の
+`receive()` は登録が残ったままになり、後続メッセージを黙って食う。
+代わりに `subscribe` + close で表現する:
 
 ```js
-const withTimeout = (p, ms) =>
-  Promise.race([p, new Promise((_, rj) => setTimeout(() => rj("timeout"), ms))]);
-
-const msg = await withTimeout(conn.receive({}), 5000);
+const sub = conn.subscribe({ cmd_code: "CLR", is_request: true });
+const timer = setTimeout(() => sub.close(), 5000);
+try {
+  const msg = await sub.recv();
+  clearTimeout(timer);
+  // ... 処理 ...
+} catch (e) {
+  // タイムアウトで close された場合 recv() が reject
+} finally {
+  sub.close();
+}
 ```
 
 ## `conn.subscribe(matcher) : Subscription` (chan-like)
@@ -140,12 +152,21 @@ handle.close();
 | イベントリスナ的に登録して寝かせたい | `serve` |
 | 送信 Request の応答 | `sendRequest` (このドキュメントは対象外) |
 
-## 完全な例: CLR にログして無視する
+## 完全な例: CLR を非同期に処理する
+
+**重要**: `subscribe` / `serve` は「登録した VU の handle」に対して
+配信される。共有 Conn に対して N VU がそれぞれ module-scope で登録
+すると、1 通の CLR が **N 回** fan-out される。またモジュール scope
+は teardown とは別 runtime なので、default() 起動 VU の handle を
+teardown() で close することはできない。
+
+したがって共有 Conn + fan-out 監視を書くときは default() 内で
+subscribe/close する:
 
 ```js
 import diameter from "k6/x/diameter";
 
-const conn = diameter.EnsureConn("hss", {
+const connOpts = {
   addr: "127.0.0.1:3868",
   host: "mme.test",
   realm: "test.realm",
@@ -153,21 +174,38 @@ const conn = diameter.EnsureConn("hss", {
   vendor_id: 10415,
   product_name: "xk6-diameter",
   hostipaddresses: ["127.0.0.1"],
-});
+};
 
-// VU 起動時に一度だけ CLR ハンドラを登録 (共有 conn なので 1 つで十分)
-const clrHandle = conn.serve(
-  { cmd_code: "CLR", is_request: true },
-  (clr) => console.log("CLR:", clr.Header.HopByHopID),
-);
+export default async function () {
+  const conn = diameter.EnsureConn("hss", connOpts);
 
-export default function () {
+  const sub = conn.subscribe({ cmd_code: "CLR", is_request: true });
+  const clrLoop = (async () => {
+    try {
+      for (;;) {
+        const clr = await sub.recv();
+        console.log("CLR:", clr.Header.HopByHopID);
+      }
+    } catch (_) { /* subscription closed / iteration ended */ }
+  })();
+
   // 通常の AIR/ULR ワークロード
-  conn.checkSendAIR({ /* ... */ });
-}
+  await conn.sendAIR({ /* ... */ });
 
-export function teardown() {
-  clrHandle.close();
+  sub.close();
+  await clrLoop;
+}
+```
+
+「複数 VU で 1 通の CLR を **1 回だけ** 誰かに処理させたい」場合は
+`serve`/`subscribe` ではなく `receive` を使う (FIFO 先着なので複数
+VU が同じ matcher で待っていても取るのは 1 VU だけ):
+
+```js
+export default async function () {
+  const conn = diameter.EnsureConn("hss", connOpts);
+  const clr = await conn.receive({ cmd_code: "CLR", is_request: true });
+  console.log("CLR:", clr.Header.HopByHopID);
 }
 ```
 

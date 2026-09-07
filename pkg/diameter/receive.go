@@ -11,9 +11,12 @@ import (
 // Receive registers a one-shot subscriber against the message
 // dispatcher and returns a Promise that resolves with the first
 // matching message. Zero-value matcher fields (missing keys in JS) are
-// wildcards. Rejects on iteration end.
+// wildcards; mistyped fields throw. Rejects on iteration end.
 func (h *ClientHdr) Receive(rawMatcher map[string]interface{}) *sobek.Promise {
-	matcher := MapToMatcher(rawMatcher)
+	matcher, err := MapToMatcher(rawMatcher)
+	if err != nil {
+		panic(h.vu.Runtime().NewGoError(err))
+	}
 	ch := h.Client.disp.registerRecv(matcher)
 	p, resolve, reject := promises.New(h.vu)
 	go func() {
@@ -36,7 +39,11 @@ func (h *ClientHdr) Receive(rawMatcher map[string]interface{}) *sobek.Promise {
 //	try { for(;;) { const msg = await sub.recv(); ... } }
 //	finally { sub.close(); }
 func (h *ClientHdr) Subscribe(rawMatcher map[string]interface{}) *Subscription {
-	return &Subscription{streamHandle: newStreamHandle(h, MapToMatcher(rawMatcher))}
+	m, err := MapToMatcher(rawMatcher)
+	if err != nil {
+		panic(h.vu.Runtime().NewGoError(err))
+	}
+	return &Subscription{streamHandle: newStreamHandle(h, m)}
 }
 
 // Serve registers a streaming subscriber whose messages are pushed to
@@ -52,7 +59,11 @@ func (h *ClientHdr) Serve(rawMatcher map[string]interface{}, cb sobek.Value) *Se
 	if !isFn {
 		panic(h.vu.Runtime().NewGoError(errors.New("Serve: cb must be a function")))
 	}
-	sh := &ServeHandle{streamHandle: newStreamHandle(h, MapToMatcher(rawMatcher))}
+	m, err := MapToMatcher(rawMatcher)
+	if err != nil {
+		panic(h.vu.Runtime().NewGoError(err))
+	}
+	sh := &ServeHandle{streamHandle: newStreamHandle(h, m)}
 	go sh.run(fn)
 	return sh
 }

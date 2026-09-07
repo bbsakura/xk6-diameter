@@ -63,6 +63,12 @@ func TestToStringBytes_Rejects(t *testing.T) {
 	if _, err := toStringBytes([]interface{}{"not-int"}); err == nil {
 		t.Fatalf("expected error for []interface{}{string}")
 	}
+	if _, err := toStringBytes([]interface{}{int64(-1)}); err == nil {
+		t.Fatalf("expected error for byte value -1")
+	}
+	if _, err := toStringBytes([]interface{}{int64(256)}); err == nil {
+		t.Fatalf("expected error for byte value 256")
+	}
 }
 
 func TestConvertByType(t *testing.T) {

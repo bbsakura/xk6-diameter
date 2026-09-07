@@ -9,7 +9,16 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 )
 
+// newMsg builds an Answer with the given HBH-ID. Answers are the only
+// message class the correlation table routes; see
+// TestCorrelationTbl_RejectsRequest for the Request path.
 func newMsg(hbhID uint32) *diam.Message {
+	m := diam.NewMessage(diam.AuthenticationInformation, 0, diam.TGPP_S6A_APP_ID, 0, 0, dict.Default)
+	m.Header.HopByHopID = hbhID
+	return m
+}
+
+func newRequestMsg(hbhID uint32) *diam.Message {
 	m := diam.NewRequest(diam.AuthenticationInformation, diam.TGPP_S6A_APP_ID, dict.Default)
 	m.Header.HopByHopID = hbhID
 	return m
@@ -41,6 +50,23 @@ func TestCorrelationTbl_OrphanDrop(t *testing.T) {
 	tbl := newCorrelationTbl()
 	if tbl.deliver(newMsg(99)) {
 		t.Fatalf("deliver of unknown hbh returned true; want false")
+	}
+}
+
+// TestCorrelationTbl_RejectsRequest guards against Requests being
+// mis-routed as Answers when their HBH-ID coincides with a pending
+// client Send. HBH-IDs are per-sender, so this collision is legal.
+func TestCorrelationTbl_RejectsRequest(t *testing.T) {
+	tbl := newCorrelationTbl()
+	ch := tbl.register(11)
+
+	if tbl.deliver(newRequestMsg(11)) {
+		t.Fatalf("Request with matching HBH-ID must not correlate")
+	}
+	select {
+	case msg := <-ch:
+		t.Fatalf("Answer channel unexpectedly received: %+v", msg.Header)
+	default:
 	}
 }
 

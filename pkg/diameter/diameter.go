@@ -191,7 +191,13 @@ func (t *correlationTbl) unregister(hbhID uint32) {
 // deliver hands m to the pending channel for its HBH-ID. Non-blocking:
 // a duplicate Answer or one arriving after Unregister is silently
 // dropped so the mux reader goroutine cannot stall on a full channel.
+// Only Answers may correlate — HBH-IDs are per-sender, so an incoming
+// Request may legitimately reuse an id that a client Send is currently
+// awaiting. Requests always fall through to the dispatcher.
 func (t *correlationTbl) deliver(m *diam.Message) bool {
+	if m.Header.CommandFlags&diam.RequestFlag != 0 {
+		return false
+	}
 	t.mu.Lock()
 	ch, ok := t.pending[m.Header.HopByHopID]
 	t.mu.Unlock()
@@ -488,9 +494,11 @@ func (c *Client) buildGeneric(req Request) (*diam.Message, error) {
 }
 
 // SendRequest writes an arbitrary Diameter Request to the wire without
-// waiting for its Answer. The Answer, if any, is silently dropped by
-// the correlation catch-all handler. Use CheckSendRequest or
-// ClientHdr.SendRequest to receive the Answer.
+// waiting for its Answer. Because no correlation entry is registered,
+// the Answer falls through to the dispatcher and can be observed by a
+// live Receive/Subscribe/Serve subscriber; otherwise it is dropped.
+// Use CheckSendRequest or ClientHdr.SendRequest to correlate an Answer
+// directly to this send.
 func (c *Client) SendRequest(req Request) (bool, error) {
 	m, err := c.buildGeneric(req)
 	if err != nil {
@@ -597,8 +605,9 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 }
 
 // ClientHdr method set mirrors Client's, except CheckSend* wrap latency
-// measurement. Connect is not exposed — Client is dialed at construction.
-func (h *ClientHdr) Close() { h.Client.Close() }
+// measurement. Neither Connect nor Close is exposed: the underlying
+// *Client is dialed at construction and shared across VUs through the
+// pools, so one JS caller must not tear it down for the others.
 
 // SendAIR returns a JS Promise that resolves with the decoded AIA
 // struct when the peer replies (correlated by Hop-by-Hop id), or
@@ -697,6 +706,10 @@ func (h *ClientHdr) sendPromise(
 			resolve(v)
 		case <-time.After(timeout):
 			err := errors.New(cmdLabel + " timeout")
+			h.pushLatency(cmdLabel, startAt, err)
+			reject(err)
+		case <-h.vu.Context().Done():
+			err := errors.New(cmdLabel + " iteration ended")
 			h.pushLatency(cmdLabel, startAt, err)
 			reject(err)
 		}
