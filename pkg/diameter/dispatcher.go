@@ -29,18 +29,17 @@ type recvSub struct {
 }
 
 type serveSub struct {
-	m      Matcher
-	ch     chan *diam.Message // buffered=serveBufSize
-	closed bool               // guarded by dispatcher.mu
+	m  Matcher
+	ch chan *diam.Message // buffered=serveBufSize
 }
 
 func newDispatcher() *dispatcher {
 	return &dispatcher{}
 }
 
-// registerRecv adds a one-shot receiver. Callers select on the returned
-// channel, then call unregisterRecv on cancellation. Once dispatch has
-// delivered to this receiver, the entry is auto-removed.
+// registerRecv adds a one-shot receiver; delivery via dispatch also
+// auto-removes the entry. Callers must call unregisterRecv on
+// cancellation to avoid leaking a never-served subscriber.
 func (d *dispatcher) registerRecv(m Matcher) chan *diam.Message {
 	sub := &recvSub{m: m, ch: make(chan *diam.Message, 1)}
 	d.mu.Lock()
@@ -49,8 +48,6 @@ func (d *dispatcher) registerRecv(m Matcher) chan *diam.Message {
 	return sub.ch
 }
 
-// unregisterRecv removes a pending receiver by its channel identity.
-// Safe to call after delivery (no-op).
 func (d *dispatcher) unregisterRecv(ch chan *diam.Message) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -62,8 +59,6 @@ func (d *dispatcher) unregisterRecv(ch chan *diam.Message) {
 	}
 }
 
-// registerServe adds a streaming subscription. Callers read from
-// sub.ch and call unregisterServe on close.
 func (d *dispatcher) registerServe(m Matcher) *serveSub {
 	sub := &serveSub{m: m, ch: make(chan *diam.Message, serveBufSize)}
 	d.mu.Lock()
@@ -72,14 +67,11 @@ func (d *dispatcher) registerServe(m Matcher) *serveSub {
 	return sub
 }
 
-// unregisterServe removes a Serve subscription and marks it closed so
-// dispatch stops feeding it. Idempotent.
 func (d *dispatcher) unregisterServe(target *serveSub) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for i, s := range d.serves {
 		if s == target {
-			s.closed = true
 			d.serves = append(d.serves[:i], d.serves[i+1:]...)
 			return
 		}
@@ -106,7 +98,7 @@ func (d *dispatcher) dispatch(msg *diam.Message) bool {
 	// Serve fan-out.
 	delivered := false
 	for _, s := range d.serves {
-		if s.closed || !s.m.match(msg) {
+		if !s.m.match(msg) {
 			continue
 		}
 		select {
