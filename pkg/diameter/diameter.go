@@ -1,8 +1,9 @@
 package diameter
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
-	"math/rand"
 	"net"
 	"strconv"
 	"sync"
@@ -283,9 +284,11 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 }
 
 func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
-	if value, ok := m[key].(int64); ok {
-		*target = uint(value)
+	value, ok := m[key].(int64)
+	if !ok || value < 0 {
+		return
 	}
+	*target = uint(value) // #nosec G115 -- non-negative int64 fits in uint on all supported platforms (64-bit)
 }
 
 // NewConn is the JS constructor for `new diameter.Conn(options)`.
@@ -372,11 +375,13 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		hostIPAddresses = append(hostIPAddresses, datatype.Address(net.ParseIP(ip)))
 	}
 	cfg := &sm.Settings{
-		OriginHost:       datatype.DiameterIdentity(options.Host),
-		OriginRealm:      datatype.DiameterIdentity(options.Realm),
-		VendorID:         datatype.Unsigned32(options.VendorId),
-		ProductName:      datatype.UTF8String(options.ProductName),
-		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
+		OriginHost: datatype.DiameterIdentity(options.Host),
+		OriginRealm: datatype.DiameterIdentity(options.Realm),
+		// #nosec G115 -- IANA vendor IDs are 32-bit; oversized values are caller bugs
+		VendorID:    datatype.Unsigned32(options.VendorId),
+		ProductName: datatype.UTF8String(options.ProductName),
+		// #nosec G115 -- Diameter OriginStateID is Unsigned32 per RFC 6733; wrap in 2106 is acceptable
+		OriginStateID:    datatype.Unsigned32(uint32(time.Now().Unix())),
 		FirmwareRevision: 1,
 		HostIPAddresses:  hostIPAddresses,
 	}
@@ -411,12 +416,15 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		EnableWatchdog:   false,
 		WatchdogInterval: 0,
 		SupportedVendorID: []*diam.AVP{
+			// #nosec G115 -- IANA vendor IDs are 32-bit
 			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 		},
 		VendorSpecificApplicationID: []*diam.AVP{
 			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
+					// #nosec G115 -- Diameter Auth-Application-Id is Unsigned32
 					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(options.AppId)),
+					// #nosec G115 -- IANA vendor IDs are 32-bit
 					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 				},
 			}),
@@ -439,7 +447,11 @@ func (c *Client) Close() {
 }
 
 func (c *Client) generateSessionID() string {
-	return "session;" + strconv.Itoa(int(rand.Uint32()))
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "session;" + strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return "session;" + hex.EncodeToString(b[:])
 }
 
 // buildRequest constructs a Diameter request with the standard S6a
@@ -529,7 +541,7 @@ func (c *Client) CheckSendRequest(req Request) (*diam.Message, error) {
 	select {
 	case resp := <-ch:
 		return resp, nil
-	case <-time.After(time.Duration(req.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(req.CompletionSleep)) * time.Second):
 		return nil, errors.Errorf("request timeout (appID=%d cmd=%d)", req.AppID, req.Cmd)
 	}
 }
@@ -564,7 +576,7 @@ func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "AIA Unmarshal failed")
 		}
 		return int64(aia.ResultCode), nil
-	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
 		return 0, errors.New("Authentication Information timeout")
 	}
 }
@@ -599,7 +611,7 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "ULA Unmarshal failed")
 		}
 		return int64(ula.ResultCode), nil
-	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
 		return 0, errors.New("Update Location timeout")
 	}
 }
@@ -616,7 +628,7 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
 	return h.sendPromise(
 		"AIR",
-		time.Duration(options.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(options.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) {
 			return h.Client.buildRequest(diam.AuthenticationInformation, options)
 		},
@@ -633,7 +645,7 @@ func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
 func (h *ClientHdr) SendULR(options ConnectionOptions) *sobek.Promise {
 	return h.sendPromise(
 		"ULR",
-		time.Duration(options.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(options.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) {
 			return h.Client.buildRequest(diam.UpdateLocation, options)
 		},
@@ -656,7 +668,7 @@ func (h *ClientHdr) SendRequest(req Request) *sobek.Promise {
 	}
 	return h.sendPromise(
 		cmdLabel,
-		time.Duration(req.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(req.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) { return h.Client.buildGeneric(req) },
 		func(m *diam.Message) (any, error) { return m, nil },
 	)
