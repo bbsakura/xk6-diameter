@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -12,6 +13,52 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
+
+// avpCacheKey identifies a (dict, app, AVP name) resolution. Dict
+// identity is by pointer because dict.Parser is expected to be immutable
+// after first use (dict.Default is a process-wide singleton and
+// per-Client dicts are set once at NewClient time).
+type avpCacheKey struct {
+	dict  *dict.Parser
+	appID uint32
+	key   string
+}
+
+// resolvedAVP is the subset of a dict.AVP entry needed to build a
+// *diam.AVP without another dict lookup.
+type resolvedAVP struct {
+	code   uint32
+	vendor uint32
+	typeID datatype.TypeID
+	flags  uint8
+}
+
+// avpResolveCache memoizes d.FindAVP(appID, key) → resolvedAVP so the
+// send hot path skips the dict traversal on repeated AVP names. Misses
+// are not cached; the cache grows to the working set of AVP names.
+var avpResolveCache sync.Map
+
+// resolveAVP returns the cached resolvedAVP for (d, appID, key),
+// populating the cache on first miss. Returns ErrNotFound if the dict
+// does not know the name.
+func resolveAVP(d *dict.Parser, appID uint32, key string) (*resolvedAVP, error) {
+	ck := avpCacheKey{dict: d, appID: appID, key: key}
+	if v, ok := avpResolveCache.Load(ck); ok {
+		return v.(*resolvedAVP), nil
+	}
+	dAvp, err := d.FindAVP(appID, key)
+	if err != nil {
+		return nil, &ErrNotFound{Name: key}
+	}
+	r := &resolvedAVP{
+		code:   dAvp.Code,
+		vendor: dAvp.VendorID,
+		typeID: dAvp.Data.Type,
+		flags:  dictFlags(dAvp),
+	}
+	actual, _ := avpResolveCache.LoadOrStore(ck, r)
+	return actual.(*resolvedAVP), nil
+}
 
 type AVP struct {
 	// TODO: json.UnmarshalJSON() to accept `[{"User-Name": "000000000"}]`
@@ -39,26 +86,27 @@ func (pair *AVP) modifyMessage(m *diam.Message, meta *smpeer.Metadata) error {
 // resolving the AVP through the message's dict.Parser: code, vendor
 // and flags come from the dictionary entry, and the value is coerced
 // to the declared datatype.TypeID via convertByType (or groupedByDict
-// for nested Grouped AVPs).
+// for nested Grouped AVPs). Dict resolution is memoized via
+// avpResolveCache.
 func makeAVPForMessage(m *diam.Message, key string, value any) (*diam.AVP, error) {
 	d := m.Dictionary()
 	if d == nil {
 		return nil, &ErrNotFound{Name: key}
 	}
-	dAvp, err := d.FindAVP(m.Header.ApplicationID, key)
+	r, err := resolveAVP(d, m.Header.ApplicationID, key)
 	if err != nil {
-		return nil, &ErrNotFound{Name: key}
+		return nil, err
 	}
 	var val datatype.Type
-	if dAvp.Data.Type == datatype.GroupedType {
+	if r.typeID == datatype.GroupedType {
 		val, err = groupedByDict(m, value)
 	} else {
-		val, err = convertByType(dAvp.Data.Type, value)
+		val, err = convertByType(r.typeID, value)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return diam.NewAVP(dAvp.Code, dictFlags(dAvp), dAvp.VendorID, val), nil
+	return diam.NewAVP(r.code, r.flags, r.vendor, val), nil
 }
 
 func dictFlags(a *dict.AVP) uint8 {
