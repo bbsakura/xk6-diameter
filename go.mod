@@ -2,6 +2,8 @@ module github.com/bbsakura/xk6-diameter
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/fiorix/go-diameter/v4 v4.3.0
 	github.com/google/uuid v1.6.0

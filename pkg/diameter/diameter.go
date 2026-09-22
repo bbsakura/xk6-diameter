@@ -377,7 +377,7 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		hostIPAddresses = append(hostIPAddresses, datatype.Address(net.ParseIP(ip)))
 	}
 	cfg := &sm.Settings{
-		OriginHost: datatype.DiameterIdentity(options.Host),
+		OriginHost:  datatype.DiameterIdentity(options.Host),
 		OriginRealm: datatype.DiameterIdentity(options.Realm),
 		// #nosec G115 -- IANA vendor IDs are 32-bit; oversized values are caller bugs
 		VendorID:    datatype.Unsigned32(options.VendorId),
