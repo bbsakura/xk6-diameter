@@ -117,6 +117,23 @@ type ConnectionOptions struct {
 	// seconds and only takes effect when EnableWatchdog is true.
 	EnableWatchdog   bool
 	WatchdogInterval uint
+
+	// TLS, when non-nil and Enable=true, dials the peer over TLS via
+	// sm.Client.DialNetworkTLS. CertFile / KeyFile are optional and
+	// only needed for mutual TLS. Peer certificate verification is
+	// governed by the underlying go-diameter default (currently
+	// InsecureSkipVerify=true — do not use as-is for cross-origin
+	// production traffic; scope TLS to controlled test environments).
+	TLS *TLSOptions
+}
+
+// TLSOptions configures the TLS handshake for ConnectionOptions.TLS.
+// Enable is the only required field; CertFile / KeyFile are used for
+// mutual TLS when the peer requires a client certificate.
+type TLSOptions struct {
+	Enable   bool
+	CertFile string
+	KeyFile  string
 }
 
 // Request describes an arbitrary Diameter command. Use this with
@@ -266,6 +283,19 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	mapNumberToUintOpt(&co.WatchdogInterval, m, "watchdog_interval")
 	if enable, ok := m["enable_watchdog"].(bool); ok {
 		co.EnableWatchdog = enable
+	}
+	if raw, ok := m["tls"].(map[string]interface{}); ok {
+		tls := &TLSOptions{}
+		if enable, ok := raw["enable"].(bool); ok {
+			tls.Enable = enable
+		}
+		if cert, ok := raw["cert_file"].(string); ok {
+			tls.CertFile = cert
+		}
+		if key, ok := raw["key_file"].(string); ok {
+			tls.KeyFile = key
+		}
+		co.TLS = tls
 	}
 
 	if productName, ok := m["product_name"].(string); ok {
@@ -471,12 +501,21 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		},
 	}
 
-	conn, err := dialer.DialNetwork(options.NetworkType, options.Addr)
+	conn, err := dialPeer(dialer, options)
 	if err != nil {
 		return nil, errors.WithMessage(err, "Dial error")
 	}
 	c.Conn = conn
 	return c, nil
+}
+
+// dialPeer dials the peer over TLS when options.TLS is enabled, else
+// over plain TCP/SCTP via the configured network type.
+func dialPeer(dialer *sm.Client, options ConnectionOptions) (diam.Conn, error) {
+	if options.TLS != nil && options.TLS.Enable {
+		return dialer.DialNetworkTLS(options.NetworkType, options.Addr, options.TLS.CertFile, options.TLS.KeyFile, nil)
+	}
+	return dialer.DialNetwork(options.NetworkType, options.Addr)
 }
 
 func (c *Client) Close() {
