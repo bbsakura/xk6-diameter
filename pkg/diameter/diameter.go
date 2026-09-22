@@ -294,22 +294,23 @@ func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
 // NewConn is the JS constructor for `new diameter.Conn(options)`.
 // It dials the peer immediately, registers the *Client in idPool, and
 // exposes the UUID v7 key on the returned object as `.id` so JS can
-// pass it to GetConn later.
+// pass it to GetConn later. Errors are thrown as JS exceptions so callers
+// can wrap this in try/catch.
 func (c *ModuleInstance) NewConn(call sobek.ConstructorCall) *sobek.Object {
 	if len(call.Arguments) != 1 {
-		panic(errors.Errorf("Conn constructor: expected 1 argument (options), got %d", len(call.Arguments)))
+		panic(c.vu.Runtime().NewGoError(errors.Errorf("Conn constructor: expected 1 argument (options), got %d", len(call.Arguments))))
 	}
 	op, ok := call.Arguments[0].Export().(map[string]interface{})
 	if !ok {
-		panic(errors.New("Conn constructor: options must be an object"))
+		panic(c.vu.Runtime().NewGoError(errors.New("Conn constructor: options must be an object")))
 	}
 	options, err := MapToConnectionOptions(op)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	cli, err := NewClient(options)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	c.rm.idPool.Store(cli.id, cli)
 	return c.wrapClient(cli)
@@ -318,7 +319,8 @@ func (c *ModuleInstance) NewConn(call sobek.ConstructorCall) *sobek.Object {
 // EnsureConn returns a ClientHdr wrapping a shared *Client from the
 // named pool so multiple VUs reuse a single Diameter connection. If no
 // entry exists for name, it dials a new *Client using params and
-// registers it in both namedPool and idPool.
+// registers it in both namedPool and idPool. Errors are thrown as JS
+// exceptions so callers can wrap this in try/catch.
 func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) *sobek.Object {
 	c.rm.mu.Lock()
 	defer c.rm.mu.Unlock()
@@ -327,11 +329,11 @@ func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) 
 	}
 	options, err := MapToConnectionOptions(params)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	cli, err := NewClient(options)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	c.rm.namedPool.Store(name, cli)
 	c.rm.idPool.Store(cli.id, cli)
@@ -339,16 +341,16 @@ func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) 
 }
 
 // GetConn returns a ClientHdr for a previously registered *Client
-// identified by the UUID v7 string exposed on `.id`. Panics if id is
-// not a valid UUID or has no live Client.
+// identified by the UUID v7 string exposed on `.id`. Throws a JS
+// exception if id is not a valid UUID or has no live Client.
 func (c *ModuleInstance) GetConn(id string) *sobek.Object {
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		panic(errors.WithMessagef(err, "GetConn: invalid uuid %q", id))
+		panic(c.vu.Runtime().NewGoError(errors.WithMessagef(err, "GetConn: invalid uuid %q", id)))
 	}
 	v, ok := c.rm.idPool.Load(uid)
 	if !ok {
-		panic(errors.Errorf("GetConn: Conn with id %q not found", id))
+		panic(c.vu.Runtime().NewGoError(errors.Errorf("GetConn: Conn with id %q not found", id)))
 	}
 	return c.wrapClient(v.(*Client))
 }
