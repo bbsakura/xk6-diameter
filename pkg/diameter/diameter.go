@@ -1,8 +1,9 @@
 package diameter
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
-	"math/rand"
 	"net"
 	"strconv"
 	"sync"
@@ -283,30 +284,33 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 }
 
 func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
-	if value, ok := m[key].(int64); ok {
-		*target = uint(value)
+	value, ok := m[key].(int64)
+	if !ok || value < 0 {
+		return
 	}
+	*target = uint(value) // #nosec G115 -- non-negative int64 fits in uint on all supported platforms (64-bit)
 }
 
 // NewConn is the JS constructor for `new diameter.Conn(options)`.
 // It dials the peer immediately, registers the *Client in idPool, and
 // exposes the UUID v7 key on the returned object as `.id` so JS can
-// pass it to GetConn later.
+// pass it to GetConn later. Errors are thrown as JS exceptions so callers
+// can wrap this in try/catch.
 func (c *ModuleInstance) NewConn(call sobek.ConstructorCall) *sobek.Object {
 	if len(call.Arguments) != 1 {
-		panic(errors.Errorf("Conn constructor: expected 1 argument (options), got %d", len(call.Arguments)))
+		panic(c.vu.Runtime().NewGoError(errors.Errorf("Conn constructor: expected 1 argument (options), got %d", len(call.Arguments))))
 	}
 	op, ok := call.Arguments[0].Export().(map[string]interface{})
 	if !ok {
-		panic(errors.New("Conn constructor: options must be an object"))
+		panic(c.vu.Runtime().NewGoError(errors.New("Conn constructor: options must be an object")))
 	}
 	options, err := MapToConnectionOptions(op)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	cli, err := NewClient(options)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	c.rm.idPool.Store(cli.id, cli)
 	return c.wrapClient(cli)
@@ -315,7 +319,8 @@ func (c *ModuleInstance) NewConn(call sobek.ConstructorCall) *sobek.Object {
 // EnsureConn returns a ClientHdr wrapping a shared *Client from the
 // named pool so multiple VUs reuse a single Diameter connection. If no
 // entry exists for name, it dials a new *Client using params and
-// registers it in both namedPool and idPool.
+// registers it in both namedPool and idPool. Errors are thrown as JS
+// exceptions so callers can wrap this in try/catch.
 func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) *sobek.Object {
 	c.rm.mu.Lock()
 	defer c.rm.mu.Unlock()
@@ -324,11 +329,11 @@ func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) 
 	}
 	options, err := MapToConnectionOptions(params)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	cli, err := NewClient(options)
 	if err != nil {
-		panic(err)
+		panic(c.vu.Runtime().NewGoError(err))
 	}
 	c.rm.namedPool.Store(name, cli)
 	c.rm.idPool.Store(cli.id, cli)
@@ -336,16 +341,16 @@ func (c *ModuleInstance) EnsureConn(name string, params map[string]interface{}) 
 }
 
 // GetConn returns a ClientHdr for a previously registered *Client
-// identified by the UUID v7 string exposed on `.id`. Panics if id is
-// not a valid UUID or has no live Client.
+// identified by the UUID v7 string exposed on `.id`. Throws a JS
+// exception if id is not a valid UUID or has no live Client.
 func (c *ModuleInstance) GetConn(id string) *sobek.Object {
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		panic(errors.WithMessagef(err, "GetConn: invalid uuid %q", id))
+		panic(c.vu.Runtime().NewGoError(errors.WithMessagef(err, "GetConn: invalid uuid %q", id)))
 	}
 	v, ok := c.rm.idPool.Load(uid)
 	if !ok {
-		panic(errors.Errorf("GetConn: Conn with id %q not found", id))
+		panic(c.vu.Runtime().NewGoError(errors.Errorf("GetConn: Conn with id %q not found", id)))
 	}
 	return c.wrapClient(v.(*Client))
 }
@@ -372,11 +377,13 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		hostIPAddresses = append(hostIPAddresses, datatype.Address(net.ParseIP(ip)))
 	}
 	cfg := &sm.Settings{
-		OriginHost:       datatype.DiameterIdentity(options.Host),
-		OriginRealm:      datatype.DiameterIdentity(options.Realm),
-		VendorID:         datatype.Unsigned32(options.VendorId),
-		ProductName:      datatype.UTF8String(options.ProductName),
-		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
+		OriginHost:  datatype.DiameterIdentity(options.Host),
+		OriginRealm: datatype.DiameterIdentity(options.Realm),
+		// #nosec G115 -- IANA vendor IDs are 32-bit; oversized values are caller bugs
+		VendorID:    datatype.Unsigned32(options.VendorId),
+		ProductName: datatype.UTF8String(options.ProductName),
+		// #nosec G115 -- Diameter OriginStateID is Unsigned32 per RFC 6733; wrap in 2106 is acceptable
+		OriginStateID:    datatype.Unsigned32(uint32(time.Now().Unix())),
 		FirmwareRevision: 1,
 		HostIPAddresses:  hostIPAddresses,
 	}
@@ -411,12 +418,15 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		EnableWatchdog:   false,
 		WatchdogInterval: 0,
 		SupportedVendorID: []*diam.AVP{
+			// #nosec G115 -- IANA vendor IDs are 32-bit
 			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 		},
 		VendorSpecificApplicationID: []*diam.AVP{
 			diam.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
+					// #nosec G115 -- Diameter Auth-Application-Id is Unsigned32
 					diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(options.AppId)),
+					// #nosec G115 -- IANA vendor IDs are 32-bit
 					diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
 				},
 			}),
@@ -439,7 +449,11 @@ func (c *Client) Close() {
 }
 
 func (c *Client) generateSessionID() string {
-	return "session;" + strconv.Itoa(int(rand.Uint32()))
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "session;" + strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return "session;" + hex.EncodeToString(b[:])
 }
 
 // buildRequest constructs a Diameter request with the standard S6a
@@ -529,7 +543,7 @@ func (c *Client) CheckSendRequest(req Request) (*diam.Message, error) {
 	select {
 	case resp := <-ch:
 		return resp, nil
-	case <-time.After(time.Duration(req.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(req.CompletionSleep)) * time.Second):
 		return nil, errors.Errorf("request timeout (appID=%d cmd=%d)", req.AppID, req.Cmd)
 	}
 }
@@ -564,7 +578,7 @@ func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "AIA Unmarshal failed")
 		}
 		return int64(aia.ResultCode), nil
-	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
 		return 0, errors.New("Authentication Information timeout")
 	}
 }
@@ -599,7 +613,7 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "ULA Unmarshal failed")
 		}
 		return int64(ula.ResultCode), nil
-	case <-time.After(time.Duration(options.CompletionSleep) * time.Second):
+	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
 		return 0, errors.New("Update Location timeout")
 	}
 }
@@ -616,7 +630,7 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
 	return h.sendPromise(
 		"AIR",
-		time.Duration(options.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(options.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) {
 			return h.Client.buildRequest(diam.AuthenticationInformation, options)
 		},
@@ -633,7 +647,7 @@ func (h *ClientHdr) SendAIR(options ConnectionOptions) *sobek.Promise {
 func (h *ClientHdr) SendULR(options ConnectionOptions) *sobek.Promise {
 	return h.sendPromise(
 		"ULR",
-		time.Duration(options.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(options.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) {
 			return h.Client.buildRequest(diam.UpdateLocation, options)
 		},
@@ -656,7 +670,7 @@ func (h *ClientHdr) SendRequest(req Request) *sobek.Promise {
 	}
 	return h.sendPromise(
 		cmdLabel,
-		time.Duration(req.CompletionSleep)*time.Second,
+		time.Duration(completionSeconds(req.CompletionSleep))*time.Second,
 		func() (*diam.Message, error) { return h.Client.buildGeneric(req) },
 		func(m *diam.Message) (any, error) { return m, nil },
 	)

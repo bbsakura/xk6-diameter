@@ -1,30 +1,24 @@
-
 /*
-smoke test: EnsureConn returns a shared Diameter connection.
+smoke test: verify the k6/x/diameter module loads and exposes its API.
+
+xk6 lint runs this without a peer available, so the test intentionally
+avoids dialing any Diameter endpoint. A functional example that dials a
+real HSS lives at examples/air-ulr-stress.js.
 */
 import diameter from "k6/x/diameter";
+import { check } from "k6";
 
 export const options = {
+    vus: 1,
+    iterations: 1,
     tags: { name: "diameter" },
 };
 
 export default function () {
-    try {
-        diameter.EnsureConn("hss-primary", {
-            addr: "127.0.0.1:3868",
-            host: "magma-oai.openair4G.eur",
-            realm: "openair4G.eur",
-            network_type: "sctp",
-            retries: 0,
-            vendor_id: 10415,
-            product_name: "xk6-diameter",
-            hostipaddresses: ["127.0.0.1"],
-        });
-    } catch (e) {
-        if (e.message && e.message.includes("i/o timeout")) {
-            return 0;
-        }
-        return e;
-    }
-    return 1;
+    check(diameter, {
+        "module is loaded": (d) => d !== null && typeof d === "object",
+        "Conn constructor is exported": (d) => typeof d.Conn === "function",
+        "EnsureConn is exported": (d) => typeof d.EnsureConn === "function",
+        "GetConn is exported": (d) => typeof d.GetConn === "function",
+    });
 }

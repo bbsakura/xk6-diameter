@@ -13,6 +13,8 @@
 // make it run on more, set the GOMAXPROCS=n environment variable.
 // See Go's FAQ for details: http://golang.org/doc/faq#Why_no_multi_CPU
 
+//go:build examples
+
 package main
 
 import (

@@ -358,3 +358,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/go,goland+all,macos,windows,linux,python
+.claude

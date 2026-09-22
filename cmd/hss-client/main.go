@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 // Diameter S6A client example.
+
+//go:build examples
+
 package main
 
 /* NOTE: If you are using OAI HSS for testing - Update oai_db database:
