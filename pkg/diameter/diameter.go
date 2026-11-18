@@ -3,11 +3,11 @@ package diameter
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log"
 	"math"
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,6 +138,13 @@ type Client struct {
 	dict *dict.Parser
 	corr *correlationTbl
 	disp *dispatcher
+
+	// sidPrefix is a per-Client random hex prefix generated once at
+	// NewClient time so generateSessionID does not call crypto/rand on
+	// every send. sidCounter is monotonically incremented to keep
+	// Session-Id values unique within this Client (RFC 6733 §8.8).
+	sidPrefix  string
+	sidCounter atomic.Uint64
 }
 
 // ID returns the Client's UUID v7 string — the key used by idPool /
@@ -163,6 +170,11 @@ type ClientHdr struct {
 	vu       modules.VU
 	mLatency *metrics.Metric
 	tags     *metrics.TagSet
+
+	// tagCache memoizes (command[, error]) → *metrics.TagSet so
+	// pushLatency avoids re-invoking tags.With per sample. Command
+	// cardinality is small (AIR/ULR + a few generic cmd_<N>).
+	tagCache sync.Map
 }
 
 // correlationTbl routes client-initiated Answers to the goroutine
@@ -412,12 +424,17 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 	if err != nil {
 		return nil, errors.WithMessage(err, "uuid.NewV7")
 	}
+	var pfx [16]byte
+	if _, err := rand.Read(pfx[:]); err != nil {
+		return nil, errors.WithMessage(err, "generate Session-Id prefix")
+	}
 	c := &Client{
-		id:   id,
-		cfg:  cfg,
-		dict: options.Dict, // nil is fine; Dict() falls back to dict.Default
-		corr: newCorrelationTbl(),
-		disp: newDispatcher(),
+		id:        id,
+		cfg:       cfg,
+		dict:      options.Dict, // nil is fine; Dict() falls back to dict.Default
+		corr:      newCorrelationTbl(),
+		disp:      newDispatcher(),
+		sidPrefix: "session;" + hex.EncodeToString(pfx[:]),
 	}
 
 	// Every incoming message hits the ALL_CMD_INDEX handler: HBH-ID
@@ -467,12 +484,13 @@ func (c *Client) Close() {
 	c.Conn.Close()
 }
 
+// generateSessionID returns a Session-Id unique within this Client.
+// The random prefix (from NewClient) plus a monotonic counter satisfies
+// RFC 6733 §8.8's per-generator uniqueness requirement without a
+// crypto/rand syscall on the hot path.
 func (c *Client) generateSessionID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "session;" + strconv.FormatInt(time.Now().UnixNano(), 16)
-	}
-	return "session;" + hex.EncodeToString(b[:])
+	n := c.sidCounter.Add(1)
+	return c.sidPrefix + ";" + strconv.FormatUint(n, 16)
 }
 
 // buildRequest constructs a Diameter request with the standard S6a
@@ -503,10 +521,10 @@ func (c *Client) buildRequest(cmd uint32, options ConnectionOptions) (*diam.Mess
 		m.Header.CommandFlags |= diam.ProxiableFlag
 	}
 	if err := modifyMessage(m, meta, options); err != nil {
-		log.Println(err)
+		return nil, errors.WithMessage(err, "modifyMessage")
 	}
 	if err := appendAVPs(m, meta, options.Additional); err != nil {
-		log.Println(err)
+		return nil, errors.WithMessage(err, "appendAVPs")
 	}
 	return m, nil
 }
@@ -559,10 +577,12 @@ func (c *Client) CheckSendRequest(req Request) (*diam.Message, error) {
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return nil, errors.WithMessage(err, "write message fail")
 	}
+	timer := time.NewTimer(time.Duration(completionSeconds(req.CompletionSleep)) * time.Second)
+	defer timer.Stop()
 	select {
 	case resp := <-ch:
 		return resp, nil
-	case <-time.After(time.Duration(completionSeconds(req.CompletionSleep)) * time.Second):
+	case <-timer.C:
 		return nil, errors.Errorf("request timeout (appID=%d cmd=%d)", req.AppID, req.Cmd)
 	}
 }
@@ -590,6 +610,8 @@ func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return 0, errors.WithMessage(err, "write message fail")
 	}
+	timer := time.NewTimer(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second)
+	defer timer.Stop()
 	select {
 	case resp := <-ch:
 		var aia AIA
@@ -597,7 +619,7 @@ func (c *Client) CheckSendAIR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "AIA Unmarshal failed")
 		}
 		return int64(aia.ResultCode), nil
-	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
+	case <-timer.C:
 		return 0, errors.New("Authentication Information timeout")
 	}
 }
@@ -625,6 +647,8 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 	if _, err := m.WriteTo(c.Conn); err != nil {
 		return 0, errors.WithMessage(err, "write message fail")
 	}
+	timer := time.NewTimer(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second)
+	defer timer.Stop()
 	select {
 	case resp := <-ch:
 		var ula ULA
@@ -632,7 +656,7 @@ func (c *Client) CheckSendULR(options ConnectionOptions) (int64, error) {
 			return 0, errors.WithMessage(err, "ULA Unmarshal failed")
 		}
 		return int64(ula.ResultCode), nil
-	case <-time.After(time.Duration(completionSeconds(options.CompletionSleep)) * time.Second):
+	case <-timer.C:
 		return 0, errors.New("Update Location timeout")
 	}
 }
@@ -728,6 +752,8 @@ func (h *ClientHdr) sendPromise(
 
 	go func() {
 		defer h.Client.corr.unregister(hbhID)
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
 		select {
 		case resp := <-ch:
 			v, err := unmarshal(resp)
@@ -737,7 +763,7 @@ func (h *ClientHdr) sendPromise(
 				return
 			}
 			resolve(v)
-		case <-time.After(timeout):
+		case <-timer.C:
 			err := errors.New(cmdLabel + " timeout")
 			h.pushLatency(cmdLabel, startAt, err)
 			reject(err)
@@ -769,16 +795,34 @@ func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
 	if state == nil {
 		return
 	}
-	tags := h.tags.With("command", cmd)
-	if err != nil {
-		tags = tags.With("error", "true")
-	}
-	now := time.Now()
+	tags := h.cachedTags(cmd, err != nil)
+	elapsed := time.Since(startAt)
 	metrics.PushIfNotDone(h.vu.Context(), state.Samples, metrics.Sample{
 		TimeSeries: metrics.TimeSeries{Metric: h.mLatency, Tags: tags},
-		Time:       now,
-		Value:      metrics.D(now.Sub(startAt)),
+		Time:       startAt.Add(elapsed),
+		Value:      metrics.D(elapsed),
 	})
+}
+
+type tagCacheKey struct {
+	cmd   string
+	isErr bool
+}
+
+// cachedTags returns the TagSet for (cmd, isErr), memoized so pushLatency
+// avoids re-invoking tags.With on every sample. Command cardinality is
+// small (AIR / ULR / cmd_<N>), so the cache never grows meaningfully.
+func (h *ClientHdr) cachedTags(cmd string, isErr bool) *metrics.TagSet {
+	key := tagCacheKey{cmd: cmd, isErr: isErr}
+	if v, ok := h.tagCache.Load(key); ok {
+		return v.(*metrics.TagSet)
+	}
+	tags := h.tags.With("command", cmd)
+	if isErr {
+		tags = tags.With("error", "true")
+	}
+	actual, _ := h.tagCache.LoadOrStore(key, tags)
+	return actual.(*metrics.TagSet)
 }
 
 // S6a/S6d-Indicator | Initial-AttachIndicator
