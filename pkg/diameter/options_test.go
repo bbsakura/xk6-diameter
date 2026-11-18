@@ -35,3 +35,36 @@ func TestMapToConnectionOptions_RejectsInvalidNumbers(t *testing.T) {
 		})
 	}
 }
+
+func TestMapToConnectionOptions_ParsesTLS(t *testing.T) {
+	co, err := MapToConnectionOptions(map[string]interface{}{
+		"tls": map[string]interface{}{"enable": true, "cert_file": "c.crt", "key_file": "c.key"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := TLSOptions{Enable: true, CertFile: "c.crt", KeyFile: "c.key"}
+	if co.TLS == nil || *co.TLS != want {
+		t.Fatalf("TLS = %+v; want %+v", co.TLS, want)
+	}
+}
+
+func TestMapToConnectionOptions_RejectsMalformedTLS(t *testing.T) {
+	cases := []struct {
+		name string
+		tls  interface{}
+	}{
+		{"tls is not an object", true},
+		{"enable is a string", map[string]interface{}{"enable": "true"}},
+		{"cert_file is not a string", map[string]interface{}{"enable": true, "cert_file": int64(1), "key_file": "c.key"}},
+		{"key_file without cert_file", map[string]interface{}{"enable": true, "key_file": "c.key"}},
+		{"cert_file without key_file", map[string]interface{}{"enable": true, "cert_file": "c.crt"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := MapToConnectionOptions(map[string]interface{}{"tls": tc.tls}); err == nil {
+				t.Fatalf("expected error for tls=%v", tc.tls)
+			}
+		})
+	}
+}

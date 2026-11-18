@@ -295,19 +295,11 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	if enable, ok := m["enable_watchdog"].(bool); ok {
 		co.EnableWatchdog = enable
 	}
-	if raw, ok := m["tls"].(map[string]interface{}); ok {
-		tls := &TLSOptions{}
-		if enable, ok := raw["enable"].(bool); ok {
-			tls.Enable = enable
-		}
-		if cert, ok := raw["cert_file"].(string); ok {
-			tls.CertFile = cert
-		}
-		if key, ok := raw["key_file"].(string); ok {
-			tls.KeyFile = key
-		}
-		co.TLS = tls
+	tlsOpts, err := mapTLSOptions(m["tls"])
+	if err != nil {
+		return co, err
 	}
+	co.TLS = tlsOpts
 
 	if productName, ok := m["product_name"].(string); ok {
 		co.ProductName = productName
@@ -346,6 +338,36 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	}
 
 	return co, nil
+}
+
+// mapTLSOptions parses the JS `tls` object. Malformed values are errors
+// rather than ignored, since silently ignoring them could downgrade the
+// connection to plaintext or drop the client certificate.
+func mapTLSOptions(raw any) (*TLSOptions, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, errors.Errorf("option \"tls\" must be an object, got %T", raw)
+	}
+	t := &TLSOptions{}
+	if v, ok := m["enable"]; ok && v != nil {
+		if t.Enable, ok = v.(bool); !ok {
+			return nil, errors.Errorf("option \"tls.enable\" must be a boolean, got %T", v)
+		}
+	}
+	for key, dst := range map[string]*string{"cert_file": &t.CertFile, "key_file": &t.KeyFile} {
+		if v, ok := m[key]; ok && v != nil {
+			if *dst, ok = v.(string); !ok {
+				return nil, errors.Errorf("option \"tls.%s\" must be a string, got %T", key, v)
+			}
+		}
+	}
+	if (t.CertFile == "") != (t.KeyFile == "") {
+		return nil, errors.New("options \"tls.cert_file\" and \"tls.key_file\" must be set together")
+	}
+	return t, nil
 }
 
 func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string, maxValue uint64) error {
