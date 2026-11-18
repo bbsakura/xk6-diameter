@@ -37,6 +37,16 @@ declare module "k6/x/diameter" {
      * Answer before rejecting. `0` returns immediately.
      */
     completion_sleep?: number;
+    /**
+     * Send RFC 3539 Device-Watchdog-Requests to detect dead peers on
+     * long-lived connections. Off by default.
+     */
+    enable_watchdog?: boolean;
+    /**
+     * Watchdog interval in seconds when `enable_watchdog` is true.
+     * `0` uses the go-diameter default (5s); values above one year are clamped.
+     */
+    watchdog_interval?: number;
     /** Override Session-Id (generated if omitted). */
     session_id?: string;
     /** Destination-Host AVP; omit to let the peer's Origin-Host be used. */
