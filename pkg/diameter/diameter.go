@@ -3,6 +3,7 @@ package diameter
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -250,11 +251,21 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 		co.NetworkType = networkType
 	}
 
-	mapNumberToUintOpt(&co.Retries, m, "retries")
-	mapNumberToUintOpt(&co.VendorId, m, "vendor_id")
-	mapNumberToUintOpt(&co.AppId, m, "app_id")
-	mapNumberToUintOpt(&co.Vectors, m, "vectors")
-	mapNumberToUintOpt(&co.CompletionSleep, m, "completion_sleep")
+	for _, f := range []struct {
+		target *uint
+		key    string
+		max    uint64
+	}{
+		{&co.Retries, "retries", math.MaxUint32},
+		{&co.VendorId, "vendor_id", math.MaxUint32},
+		{&co.AppId, "app_id", math.MaxUint32},
+		{&co.Vectors, "vectors", math.MaxUint32},
+		{&co.CompletionSleep, "completion_sleep", math.MaxUint32},
+	} {
+		if err := mapNumberToUintOpt(f.target, m, f.key, f.max); err != nil {
+			return co, err
+		}
+	}
 
 	if productName, ok := m["product_name"].(string); ok {
 		co.ProductName = productName
@@ -295,12 +306,20 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	return co, nil
 }
 
-func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
-	value, ok := m[key].(int64)
-	if !ok || value < 0 {
-		return
+func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string, maxValue uint64) error {
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return nil
 	}
-	*target = uint(value) // #nosec G115 -- non-negative int64 fits in uint on all supported platforms (64-bit)
+	value, ok := raw.(int64)
+	if !ok {
+		return errors.Errorf("option %q must be an integer, got %T", key, raw)
+	}
+	if value < 0 || uint64(value) > maxValue {
+		return errors.Errorf("option %q out of range [0, %d]: %d", key, maxValue, value)
+	}
+	*target = uint(value) // #nosec G115 -- bounded by maxValue (<= MaxUint32)
+	return nil
 }
 
 // NewConn is the JS constructor for `new diameter.Conn(options)`.
