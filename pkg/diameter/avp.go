@@ -3,9 +3,11 @@ package diameter
 import (
 	"errors"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"weak"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -14,12 +16,11 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
-// avpCacheKey identifies a (dict, app, AVP name) resolution. Dict
-// identity is by pointer because dict.Parser is expected to be immutable
-// after first use (dict.Default is a process-wide singleton and
-// per-Client dicts are set once at NewClient time).
+// avpCacheKey identifies an (app, AVP name) resolution within one
+// dict.Parser. Parsers are expected to be immutable after first use
+// (dict.Default is a process-wide singleton and per-Client dicts are set
+// once at NewClient time).
 type avpCacheKey struct {
-	dict  *dict.Parser
 	appID uint32
 	key   string
 }
@@ -33,17 +34,42 @@ type resolvedAVP struct {
 	flags  uint8
 }
 
-// avpResolveCache memoizes d.FindAVP(appID, key) → resolvedAVP so the
-// send hot path skips the dict traversal on repeated AVP names. Misses
-// are not cached; the cache grows to the working set of AVP names.
-var avpResolveCache sync.Map
+// defaultAVPCache holds resolutions for dict.Default, which lives for
+// the whole process. avpResolveCache holds the per-parser caches for
+// custom dicts keyed by weak.Pointer[dict.Parser], so a custom parser can
+// be collected once no Client uses it; a cleanup then drops its map.
+// Both map avpCacheKey → *resolvedAVP; misses are not cached.
+var (
+	defaultAVPCache sync.Map
+	avpResolveCache sync.Map
+)
+
+func parserAVPCache(d *dict.Parser) *sync.Map {
+	// weak.Make costs about as much as FindAVP itself, so keep the common
+	// dict.Default path free of it.
+	if d == dict.Default {
+		return &defaultAVPCache
+	}
+	wp := weak.Make(d)
+	if v, ok := avpResolveCache.Load(wp); ok {
+		return v.(*sync.Map)
+	}
+	v, loaded := avpResolveCache.LoadOrStore(wp, &sync.Map{})
+	if !loaded {
+		runtime.AddCleanup(d, func(wp weak.Pointer[dict.Parser]) {
+			avpResolveCache.Delete(wp)
+		}, wp)
+	}
+	return v.(*sync.Map)
+}
 
 // resolveAVP returns the cached resolvedAVP for (d, appID, key),
 // populating the cache on first miss. Returns ErrNotFound if the dict
 // does not know the name.
 func resolveAVP(d *dict.Parser, appID uint32, key string) (*resolvedAVP, error) {
-	ck := avpCacheKey{dict: d, appID: appID, key: key}
-	if v, ok := avpResolveCache.Load(ck); ok {
+	cache := parserAVPCache(d)
+	ck := avpCacheKey{appID: appID, key: key}
+	if v, ok := cache.Load(ck); ok {
 		return v.(*resolvedAVP), nil
 	}
 	dAvp, err := d.FindAVP(appID, key)
@@ -56,7 +82,7 @@ func resolveAVP(d *dict.Parser, appID uint32, key string) (*resolvedAVP, error) 
 		typeID: dAvp.Data.Type,
 		flags:  dictFlags(dAvp),
 	}
-	actual, _ := avpResolveCache.LoadOrStore(ck, r)
+	actual, _ := cache.LoadOrStore(ck, r)
 	return actual.(*resolvedAVP), nil
 }
 

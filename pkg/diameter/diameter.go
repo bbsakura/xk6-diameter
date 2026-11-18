@@ -3,6 +3,7 @@ package diameter
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -258,12 +259,22 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 		co.NetworkType = networkType
 	}
 
-	mapNumberToUintOpt(&co.Retries, m, "retries")
-	mapNumberToUintOpt(&co.VendorId, m, "vendor_id")
-	mapNumberToUintOpt(&co.AppId, m, "app_id")
-	mapNumberToUintOpt(&co.Vectors, m, "vectors")
-	mapNumberToUintOpt(&co.CompletionSleep, m, "completion_sleep")
-	mapNumberToUintOpt(&co.WatchdogInterval, m, "watchdog_interval")
+	for _, f := range []struct {
+		target *uint
+		key    string
+		max    uint64
+	}{
+		{&co.Retries, "retries", math.MaxUint32},
+		{&co.VendorId, "vendor_id", math.MaxUint32},
+		{&co.AppId, "app_id", math.MaxUint32},
+		{&co.Vectors, "vectors", math.MaxUint32},
+		{&co.CompletionSleep, "completion_sleep", math.MaxUint32},
+		{&co.WatchdogInterval, "watchdog_interval", math.MaxUint32},
+	} {
+		if err := mapNumberToUintOpt(f.target, m, f.key, f.max); err != nil {
+			return co, err
+		}
+	}
 	if enable, ok := m["enable_watchdog"].(bool); ok {
 		co.EnableWatchdog = enable
 	}
@@ -307,12 +318,20 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	return co, nil
 }
 
-func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string) {
-	value, ok := m[key].(int64)
-	if !ok || value < 0 {
-		return
+func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string, maxValue uint64) error {
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return nil
 	}
-	*target = uint(value) // #nosec G115 -- non-negative int64 fits in uint on all supported platforms (64-bit)
+	value, ok := raw.(int64)
+	if !ok {
+		return errors.Errorf("option %q must be an integer, got %T", key, raw)
+	}
+	if value < 0 || uint64(value) > maxValue {
+		return errors.Errorf("option %q out of range [0, %d]: %d", key, maxValue, value)
+	}
+	*target = uint(value) // #nosec G115 -- bounded by maxValue (<= MaxUint32)
+	return nil
 }
 
 // NewConn is the JS constructor for `new diameter.Conn(options)`.
@@ -417,15 +436,9 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 	if err != nil {
 		return nil, errors.WithMessage(err, "uuid.NewV7")
 	}
-	var pfx [8]byte
+	var pfx [16]byte
 	if _, err := rand.Read(pfx[:]); err != nil {
-		// crypto/rand only errors on catastrophic OS entropy failure;
-		// fall back to nanoseconds so we still hand out something unique
-		// per NewClient call within a process.
-		nsec := uint64(time.Now().UnixNano()) // #nosec G115 -- non-negative Unix nanoseconds fit in uint64 until year 2262
-		for i := range pfx {
-			pfx[i] = byte(nsec >> (8 * i))
-		}
+		return nil, errors.WithMessage(err, "generate Session-Id prefix")
 	}
 	c := &Client{
 		id:        id,
@@ -806,14 +819,16 @@ func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
 	})
 }
 
+type tagCacheKey struct {
+	cmd   string
+	isErr bool
+}
+
 // cachedTags returns the TagSet for (cmd, isErr), memoized so pushLatency
 // avoids re-invoking tags.With on every sample. Command cardinality is
 // small (AIR / ULR / cmd_<N>), so the cache never grows meaningfully.
 func (h *ClientHdr) cachedTags(cmd string, isErr bool) *metrics.TagSet {
-	key := cmd
-	if isErr {
-		key += "|err"
-	}
+	key := tagCacheKey{cmd: cmd, isErr: isErr}
 	if v, ok := h.tagCache.Load(key); ok {
 		return v.(*metrics.TagSet)
 	}
