@@ -128,13 +128,19 @@ func MapToMatcher(m map[string]interface{}) (Matcher, error) {
 		if !ok {
 			return Matcher{}, fmt.Errorf("matcher: app_id must be number, got %T", raw)
 		}
-		u := uint32(v)
+		u, err := safeUint32(v)
+		if err != nil {
+			return Matcher{}, fmt.Errorf("matcher: app_id: %w", err)
+		}
 		out.AppID = &u
 	}
 	if raw, present := m["cmd_code"]; present {
 		switch v := raw.(type) {
 		case int64:
-			u := uint32(v)
+			u, err := safeUint32(v)
+			if err != nil {
+				return Matcher{}, fmt.Errorf("matcher: cmd_code: %w", err)
+			}
 			out.CmdCode = &u
 		case string:
 			if code, ok := resolveCmdName(v); ok {

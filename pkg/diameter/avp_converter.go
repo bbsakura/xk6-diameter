@@ -25,7 +25,11 @@ func toEnumerated(v interface{}) (datatype.Type, error) {
 	if !ok {
 		return nil, &ErrInvalidType{Value: v, Want: "int32"}
 	}
-	return datatype.Enumerated(val), nil
+	i32, err := safeInt32(val)
+	if err != nil {
+		return nil, err
+	}
+	return datatype.Enumerated(i32), nil
 }
 
 func toUnsigned32(v interface{}) (datatype.Type, error) {
@@ -33,7 +37,11 @@ func toUnsigned32(v interface{}) (datatype.Type, error) {
 	if !ok {
 		return nil, &ErrInvalidType{Value: v, Want: "uint32"}
 	}
-	return datatype.Unsigned32(val), nil
+	u32, err := safeUint32(val)
+	if err != nil {
+		return nil, err
+	}
+	return datatype.Unsigned32(u32), nil
 }
 
 // toStringBytes accepts the three forms sobek surfaces for byte-ish data:

@@ -113,7 +113,11 @@ func convertByType(t datatype.TypeID, v any) (datatype.Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		return datatype.Integer32(i), nil
+		i32, err := safeInt32(i)
+		if err != nil {
+			return nil, err
+		}
+		return datatype.Integer32(i32), nil
 	case datatype.Integer64Type:
 		i, err := toInt64(v)
 		if err != nil {
@@ -127,7 +131,11 @@ func convertByType(t datatype.TypeID, v any) (datatype.Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		return datatype.Unsigned64(uint64(i)), nil
+		u64, err := safeUint64(i)
+		if err != nil {
+			return nil, err
+		}
+		return datatype.Unsigned64(u64), nil
 	case datatype.Float32Type:
 		f, err := toFloat64(v)
 		if err != nil {

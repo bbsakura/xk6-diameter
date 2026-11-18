@@ -32,7 +32,7 @@ single_target:
 
 cmd_build: $(TARGETS)
 $(TARGETS):
-	$(GOCMD) build -o out/bin/$@ ./cmd/$@/...
+	$(GOCMD) build -tags examples -o out/bin/$@ ./cmd/$@/...
 
 clean: ## Remove build related file
 	rm -fr ./out/bin
