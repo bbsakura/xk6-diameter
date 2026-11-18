@@ -33,9 +33,6 @@ func safeUint64(v int64) (uint64, error) {
 	return uint64(v), nil
 }
 
-// completionTimeout caps a caller-supplied "seconds to wait" value to
-// something we can multiply by time.Second without overflowing int64.
-// Anything above one year is treated as "wait forever-ish" and clamped.
 const maxCompletionSeconds = 365 * 24 * 60 * 60 // one year
 
 // completionSeconds converts a uint (JS number) to a bounded int64 count
