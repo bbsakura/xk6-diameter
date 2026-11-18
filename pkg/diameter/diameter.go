@@ -460,14 +460,11 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 	}))
 
 	dialer := &sm.Client{
-		Dict:           c.Dict(),
-		Handler:        mux,
-		MaxRetransmits: options.Retries,
-		EnableWatchdog: options.EnableWatchdog,
-		// #nosec G115 -- WatchdogInterval is seconds from JS; realistic
-		// values are well below math.MaxInt64/time.Second, so the widening
-		// to int64 cannot overflow.
-		WatchdogInterval: time.Duration(options.WatchdogInterval) * time.Second,
+		Dict:             c.Dict(),
+		Handler:          mux,
+		MaxRetransmits:   options.Retries,
+		EnableWatchdog:   options.EnableWatchdog,
+		WatchdogInterval: time.Duration(completionSeconds(options.WatchdogInterval)) * time.Second,
 		SupportedVendorID: []*diam.AVP{
 			// #nosec G115 -- IANA vendor IDs are 32-bit
 			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
