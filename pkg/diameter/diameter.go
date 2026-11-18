@@ -804,14 +804,16 @@ func (h *ClientHdr) pushLatency(cmd string, startAt time.Time, err error) {
 	})
 }
 
+type tagCacheKey struct {
+	cmd   string
+	isErr bool
+}
+
 // cachedTags returns the TagSet for (cmd, isErr), memoized so pushLatency
 // avoids re-invoking tags.With on every sample. Command cardinality is
 // small (AIR / ULR / cmd_<N>), so the cache never grows meaningfully.
 func (h *ClientHdr) cachedTags(cmd string, isErr bool) *metrics.TagSet {
-	key := cmd
-	if isErr {
-		key += "|err"
-	}
+	key := tagCacheKey{cmd: cmd, isErr: isErr}
 	if v, ok := h.tagCache.Load(key); ok {
 		return v.(*metrics.TagSet)
 	}
