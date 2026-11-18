@@ -118,6 +118,23 @@ type ConnectionOptions struct {
 	// seconds and only takes effect when EnableWatchdog is true.
 	EnableWatchdog   bool
 	WatchdogInterval uint
+
+	// TLS, when non-nil and Enable=true, dials the peer over TLS via
+	// sm.Client.DialNetworkTLS. CertFile / KeyFile are optional and
+	// only needed for mutual TLS. Peer certificate verification is
+	// governed by the underlying go-diameter default (currently
+	// InsecureSkipVerify=true — do not use as-is for cross-origin
+	// production traffic; scope TLS to controlled test environments).
+	TLS *TLSOptions
+}
+
+// TLSOptions configures the TLS handshake for ConnectionOptions.TLS.
+// Enable is the only required field; CertFile / KeyFile are used for
+// mutual TLS when the peer requires a client certificate.
+type TLSOptions struct {
+	Enable   bool
+	CertFile string
+	KeyFile  string
 }
 
 // Request describes an arbitrary Diameter command. Use this with
@@ -278,6 +295,11 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	if enable, ok := m["enable_watchdog"].(bool); ok {
 		co.EnableWatchdog = enable
 	}
+	tlsOpts, err := mapTLSOptions(m["tls"])
+	if err != nil {
+		return co, err
+	}
+	co.TLS = tlsOpts
 
 	if productName, ok := m["product_name"].(string); ok {
 		co.ProductName = productName
@@ -316,6 +338,36 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 	}
 
 	return co, nil
+}
+
+// mapTLSOptions parses the JS `tls` object. Malformed values are errors
+// rather than ignored, since silently ignoring them could downgrade the
+// connection to plaintext or drop the client certificate.
+func mapTLSOptions(raw any) (*TLSOptions, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, errors.Errorf("option \"tls\" must be an object, got %T", raw)
+	}
+	t := &TLSOptions{}
+	if v, ok := m["enable"]; ok && v != nil {
+		if t.Enable, ok = v.(bool); !ok {
+			return nil, errors.Errorf("option \"tls.enable\" must be a boolean, got %T", v)
+		}
+	}
+	for key, dst := range map[string]*string{"cert_file": &t.CertFile, "key_file": &t.KeyFile} {
+		if v, ok := m[key]; ok && v != nil {
+			if *dst, ok = v.(string); !ok {
+				return nil, errors.Errorf("option \"tls.%s\" must be a string, got %T", key, v)
+			}
+		}
+	}
+	if (t.CertFile == "") != (t.KeyFile == "") {
+		return nil, errors.New("options \"tls.cert_file\" and \"tls.key_file\" must be set together")
+	}
+	return t, nil
 }
 
 func mapNumberToUintOpt(target *uint, m map[string]interface{}, key string, maxValue uint64) error {
@@ -481,12 +533,21 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		},
 	}
 
-	conn, err := dialer.DialNetwork(options.NetworkType, options.Addr)
+	conn, err := dialPeer(dialer, options)
 	if err != nil {
 		return nil, errors.WithMessage(err, "Dial error")
 	}
 	c.Conn = conn
 	return c, nil
+}
+
+// dialPeer dials the peer over TLS when options.TLS is enabled, else
+// over plain TCP/SCTP via the configured network type.
+func dialPeer(dialer *sm.Client, options ConnectionOptions) (diam.Conn, error) {
+	if options.TLS != nil && options.TLS.Enable {
+		return dialer.DialNetworkTLS(options.NetworkType, options.Addr, options.TLS.CertFile, options.TLS.KeyFile, nil)
+	}
+	return dialer.DialNetwork(options.NetworkType, options.Addr)
 }
 
 func (c *Client) Close() {

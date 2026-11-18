@@ -21,6 +21,10 @@ const testVendor3GPP = 10415
 // via m.Answer, so mis-correlation is directly observable.
 func newTestHSS(t *testing.T, delay time.Duration) *diamtest.Server {
 	t.Helper()
+	return diamtest.NewServer(newTestHSSMux(delay), dict.Default)
+}
+
+func newTestHSSMux(delay time.Duration) *sm.StateMachine {
 	settings := &sm.Settings{
 		OriginHost:       "hss.test",
 		OriginRealm:      "test.realm",
@@ -44,7 +48,7 @@ func newTestHSS(t *testing.T, delay time.Duration) *diamtest.Server {
 			answer(c, m, settings, diam.Success)
 		}),
 	)
-	return diamtest.NewServer(mux, dict.Default)
+	return mux
 }
 
 func answer(c diam.Conn, m *diam.Message, s *sm.Settings, code uint32) {
@@ -66,9 +70,8 @@ func answer(c diam.Conn, m *diam.Message, s *sm.Settings, code uint32) {
 	}
 }
 
-func dialClient(t *testing.T, addr string) *Client {
-	t.Helper()
-	cli, err := NewClient(ConnectionOptions{
+func clientOptions(addr string) ConnectionOptions {
+	return ConnectionOptions{
 		Addr:            addr,
 		Host:            "client.test",
 		Realm:           "test.realm",
@@ -77,7 +80,17 @@ func dialClient(t *testing.T, addr string) *Client {
 		ProductName:     "xk6-diameter-test",
 		HostIPAddresses: []string{"127.0.0.1"},
 		AppId:           diam.TGPP_S6A_APP_ID,
-	})
+	}
+}
+
+func dialClient(t *testing.T, addr string) *Client {
+	t.Helper()
+	return dialClientWithOptions(t, clientOptions(addr))
+}
+
+func dialClientWithOptions(t *testing.T, opts ConnectionOptions) *Client {
+	t.Helper()
+	cli, err := NewClient(opts)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
