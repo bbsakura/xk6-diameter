@@ -110,6 +110,14 @@ type ConnectionOptions struct {
 	// Dict overrides dict.Default for both sm.Client and outgoing
 	// Requests. Nil falls back to dict.Default (existing behavior).
 	Dict *dict.Parser
+
+	// EnableWatchdog toggles the RFC 3539 Diameter Watchdog (DWR/DWA)
+	// on the underlying sm.Client. Off by default so short tests do not
+	// generate unexpected traffic; enable for long-lived connections
+	// where the peer may drop idle sockets. WatchdogInterval is in
+	// seconds and only takes effect when EnableWatchdog is true.
+	EnableWatchdog   bool
+	WatchdogInterval uint
 }
 
 // Request describes an arbitrary Diameter command. Use this with
@@ -261,10 +269,14 @@ func MapToConnectionOptions(m map[string]interface{}) (ConnectionOptions, error)
 		{&co.AppId, "app_id", math.MaxUint32},
 		{&co.Vectors, "vectors", math.MaxUint32},
 		{&co.CompletionSleep, "completion_sleep", math.MaxUint32},
+		{&co.WatchdogInterval, "watchdog_interval", math.MaxUint32},
 	} {
 		if err := mapNumberToUintOpt(f.target, m, f.key, f.max); err != nil {
 			return co, err
 		}
+	}
+	if enable, ok := m["enable_watchdog"].(bool); ok {
+		co.EnableWatchdog = enable
 	}
 
 	if productName, ok := m["product_name"].(string); ok {
@@ -451,8 +463,8 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 		Dict:             c.Dict(),
 		Handler:          mux,
 		MaxRetransmits:   options.Retries,
-		EnableWatchdog:   false,
-		WatchdogInterval: 0,
+		EnableWatchdog:   options.EnableWatchdog,
+		WatchdogInterval: time.Duration(completionSeconds(options.WatchdogInterval)) * time.Second,
 		SupportedVendorID: []*diam.AVP{
 			// #nosec G115 -- IANA vendor IDs are 32-bit
 			diam.NewAVP(avp.SupportedVendorID, avp.Mbit, 0, datatype.Unsigned32(options.VendorId)),
