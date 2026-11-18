@@ -424,15 +424,9 @@ func NewClient(options ConnectionOptions) (*Client, error) {
 	if err != nil {
 		return nil, errors.WithMessage(err, "uuid.NewV7")
 	}
-	var pfx [8]byte
+	var pfx [16]byte
 	if _, err := rand.Read(pfx[:]); err != nil {
-		// crypto/rand only errors on catastrophic OS entropy failure;
-		// fall back to nanoseconds so we still hand out something unique
-		// per NewClient call within a process.
-		nsec := uint64(time.Now().UnixNano()) // #nosec G115 -- non-negative Unix nanoseconds fit in uint64 until year 2262
-		for i := range pfx {
-			pfx[i] = byte(nsec >> (8 * i))
-		}
+		return nil, errors.WithMessage(err, "generate Session-Id prefix")
 	}
 	c := &Client{
 		id:        id,
